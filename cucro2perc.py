@@ -35,9 +35,11 @@ Notes
 * If CIF_PATH does not exist, a built-in CuCrO2 structure is used instead, so
   the script always runs.
 * Transparency shows in Material Preview or Rendered viewport shading.
-* SETUP_SCENE adds a camera, lights and render settings. The film is
-  transparent by default and the output is RGBA, so the rendered PNG can be
-  layered straight over a PowerPoint slide.
+* SETUP_SCENE adds a camera, lights and render settings. BACKGROUND_MODE
+  picks between the deep blue field of the reference figure, a flat colour,
+  and a transparent RGBA film for layering the render over a slide.
+* LAYER_GAP pulls the Cu planes and the CrO2 slabs apart vertically, and
+  SHOW_VERTICAL_BONDS drops the struts that run between them.
 """
 
 import bpy
@@ -110,9 +112,29 @@ RADII = {
 }
 DEFAULT_RADIUS = 0.45
 
+# --- layer stacking ----------------------------------------------------------
+LAYER_GAP        = 0.0       # extra vertical distance (A) inserted between the
+                             # Cu (A) planes and the CrO2 slabs on either side
+                             # of them. 0 = the true crystal spacing; a couple
+                             # of Angstrom pulls the layers apart so the
+                             # sandwich is legible in a figure. It is a display
+                             # exaggeration only: bonds, neighbours and the
+                             # percolation analysis are all computed on the
+                             # real geometry first, so the bonds simply stretch.
+SLAB_TOL         = 1.4       # (A) height gap that separates one O-Cr-O slab
+                             # from the next layer. Between 1.0 and 1.8 for
+                             # CuCrO2; only used to group atoms into layers.
+
 # --- what to draw ------------------------------------------------------------
 SHOW_ATOMS        = True
 SHOW_BONDS        = False    # chemical Cu-O / Cr-O bonds (off = figure style)
+SHOW_VERTICAL_BONDS = True   # False drops every bond that runs between layers
+                             # (the vertical Cu-O struts, and the interlayer
+                             # rungs of the channel network when
+                             # CONNECT_INTERLAYER is on), leaving only the
+                             # in-plane connectivity
+VERTICAL_BOND_ANGLE = 40.0   # degrees: a bond counts as "vertical" when it
+                             # sits within this angle of the stacking axis
 SHOW_CHANNELS     = True     # purple network linking adjacent metallic sites
 SHOW_LATTICE_GUIDE = False   # faint network over ALL A sites (figure's dashes)
 SHOW_A_SITES      = True
@@ -143,10 +165,19 @@ CLEAR_SCENE      = True
 
 # --- scene / render ----------------------------------------------------------
 SETUP_SCENE            = True   # camera, lights and render settings
-TRANSPARENT_BACKGROUND = True   # render with an alpha channel, so the image
-                                # drops straight onto a slide
-BACKGROUND_COLOR       = "#FFFFFF"  # only used when TRANSPARENT_BACKGROUND
-                                    # is False
+BACKGROUND_MODE        = "gradient"
+                                # "gradient"    -> the deep blue field of the
+                                #   reference image, dark at the bottom and
+                                #   brighter towards the top
+                                # "flat"        -> a single BACKGROUND_COLOR
+                                # "transparent" -> alpha channel, for layering
+                                #   this render over something else. This is
+                                #   the base layer of the pair, so it carries
+                                #   the blue and exciton.py stays transparent
+                                #   on top of it; flip both to "transparent"
+                                #   instead if the slide itself is blue.
+BACKGROUND_COLOR       = "#0A2A5E"  # deep blue, sampled from Reference 1
+BACKGROUND_TOP_COLOR   = "#12539E"  # brighter blue at the top of the gradient
 ORTHOGRAPHIC           = True   # the usual choice for a structure figure:
                                 # no perspective convergence across the sheet
 CAMERA_MARGIN          = 1.06   # >1 leaves a little air around the structure
@@ -538,6 +569,21 @@ def view_quaternion(view, va, vb, vc):
     return d.normalized().rotation_difference(Vector((0.0, 0.0, 1.0)))
 
 
+def stacking_axis(q, va, vb):
+    """
+    Unit normal of the A-site planes, in the rotated (view) frame.
+
+    The layers are perpendicular to c*, i.e. to a x b -- which for a hexagonal
+    cell is c itself. For the default VIEW_DIRECTION = "001" this comes out as
+    +Z, which is what the rest of the script's plane bookkeeping assumes.
+    """
+    n = va.cross(vb)
+    if n.length < 1e-9:
+        return Vector((0.0, 0.0, 1.0))
+    n = (q @ n.normalized())
+    return n if n.z >= 0.0 else -n
+
+
 def build_supercell(struct):
     """Return list of [elem, Vector pos], centred in XY and resting at z >= 0."""
     a, b, c, al, be, ga = struct["cell"]
@@ -561,7 +607,7 @@ def build_supercell(struct):
     zmin = min(p[1].z for p in atoms)
     for p in atoms:
         p[1] = Vector((p[1].x - cx, p[1].y - cy, p[1].z - zmin))
-    return atoms, (va, vb, vc)
+    return atoms, (va, vb, vc), stacking_axis(q, va, vb)
 
 
 def _crop_to_a_planes(atoms):
@@ -578,6 +624,75 @@ def _crop_to_a_planes(atoms):
     # sandwiched above the last A-plane we are keeping
     cutoff = a_z[N_A_PLANES] - PLANE_TOL
     return [p for p in atoms if p[1].z <= cutoff]
+
+
+def layer_groups(atoms, stack_axis):
+    """
+    Split the atoms into the alternating layers of the delafossite stack: flat
+    A-site (Cu) planes, and the O-Cr-O slabs sandwiched between them.
+
+    A-site atoms are grouped by height to within PLANE_TOL. Everything else is
+    sorted by height and cut wherever the gap to the next atom exceeds
+    SLAB_TOL, which is what separates one O-Cr-O slab from the next.
+
+    Returns [(mean height, [atom indices])], ordered bottom to top.
+    """
+    s = [stack_axis.dot(p) for _, p in atoms]
+    groups = {}
+    rest = []
+    for i, (elem, _) in enumerate(atoms):
+        if elem == A_SITE_ELEMENT:
+            groups.setdefault(("A", round(s[i] / PLANE_TOL)), []).append(i)
+        else:
+            rest.append(i)
+
+    rest.sort(key=lambda i: s[i])
+    slab, last, n = [], None, 0
+    for i in rest:
+        if last is not None and s[i] - last > SLAB_TOL:
+            groups[("B", n)] = slab
+            slab, n = [], n + 1
+        slab.append(i)
+        last = s[i]
+    if slab:
+        groups[("B", n)] = slab
+
+    out = [(sum(s[i] for i in ids) / len(ids), ids) for ids in groups.values()]
+    out.sort(key=lambda t: t[0])
+    return out
+
+
+def layer_offsets(atoms, stack_axis):
+    """
+    Per-atom displacement that pulls consecutive layers LAYER_GAP further
+    apart along the stacking axis, keeping the stack centred on where it was.
+    """
+    zero = Vector((0.0, 0.0, 0.0))
+    if abs(LAYER_GAP) < 1e-9:
+        return [zero] * len(atoms)
+    groups = layer_groups(atoms, stack_axis)
+    n = len(groups)
+    off = [zero] * len(atoms)
+    for k, (_, ids) in enumerate(groups):
+        d = stack_axis * (LAYER_GAP * (k - (n - 1) * 0.5))
+        for i in ids:
+            off[i] = d
+    return off
+
+
+def is_vertical(p1, p2, stack_axis):
+    """True when the segment runs between layers rather than within one."""
+    d = p2 - p1
+    if d.length < 1e-9:
+        return False
+    return abs(d.dot(stack_axis)) / d.length > cos(radians(VERTICAL_BOND_ANGLE))
+
+
+def drop_vertical(segments, stack_axis):
+    """Filter out interlayer segments when SHOW_VERTICAL_BONDS is off."""
+    if SHOW_VERTICAL_BONDS:
+        return segments
+    return [(p, q) for p, q in segments if not is_vertical(p, q, stack_axis)]
 
 
 def chemical_bonds(atoms):
@@ -905,7 +1020,7 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
     col = get_collection(f"CuCrO2_{tag}")
     off = Vector((x_offset, 0.0, 0.0))
 
-    atoms, _ = build_supercell(struct)
+    atoms, _, stack_axis = build_supercell(struct)
 
     a_idx = [i for i, (e, _) in enumerate(atoms) if e == A_SITE_ELEMENT]
     if not a_idx:
@@ -937,6 +1052,23 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
     print(f"  spanning cluster: "
           f"{'YES -- percolating (metallic)' if spanning else 'no -- disconnected (insulating)'}")
     print("  2D triangular-lattice site percolation threshold: p_c = 0.5")
+
+    # ---------------- layer gap ----------------
+    # Everything above ran on the true crystal geometry. Now that the bonds
+    # and the percolation analysis are settled, the layers can be pulled
+    # apart for legibility: the bonds computed above simply stretch, which is
+    # the point -- it is the vertical Cu-O struts that show the sandwich.
+    bond_pairs = chemical_bonds(atoms) if SHOW_BONDS else []
+    shift = layer_offsets(atoms, stack_axis)
+    if abs(LAYER_GAP) > 1e-9:
+        for i, d in enumerate(shift):
+            atoms[i][1] = atoms[i][1] + d
+        a_pos = [atoms[i][1] for i in a_idx]      # rebind after the shift
+        print(f"  layer gap: {LAYER_GAP:+.2f} A between "
+              f"{len(layer_groups(atoms, stack_axis))} layers")
+    if not SHOW_VERTICAL_BONDS:
+        print(f"  vertical bonds excluded (within "
+              f"{VERTICAL_BOND_ANGLE:.0f} deg of the stacking axis)")
 
     # ---------------- materials ----------------
     a_atoms = TRANSPARENCY.get("atoms", 0.0)
@@ -1005,31 +1137,35 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
 
     # ---------------- chemical bonds ----------------
     if SHOW_BONDS:
-        segs = [(atoms[i][1] + off, atoms[j][1] + off)
-                for i, j in chemical_bonds(atoms)]
+        segs = drop_vertical([(atoms[i][1] + off, atoms[j][1] + off)
+                              for i, j in bond_pairs], stack_axis)
         V, F = blob_cylinders(segs, BOND_RADIUS)
         add_mesh_object(f"{tag}_bonds", V, F, mat_bond, col)
 
     # ---------------- metallic channel network ----------------
     if SHOW_CHANNELS and channel_pairs:
         if COLOR_MODE == "spanning":
-            span = [(a_pos[i] + off, a_pos[j] + off) for i, j in channel_pairs
-                    if labels[i] in spanning]
-            rest = [(a_pos[i] + off, a_pos[j] + off) for i, j in channel_pairs
-                    if labels[i] not in spanning]
+            span = drop_vertical([(a_pos[i] + off, a_pos[j] + off)
+                                  for i, j in channel_pairs
+                                  if labels[i] in spanning], stack_axis)
+            rest = drop_vertical([(a_pos[i] + off, a_pos[j] + off)
+                                  for i, j in channel_pairs
+                                  if labels[i] not in spanning], stack_axis)
             V, F = blob_cylinders(span, CHANNEL_RADIUS)
             add_mesh_object(f"{tag}_channels_spanning", V, F, mat_chan, col)
             V, F = blob_cylinders(rest, CHANNEL_RADIUS)
             add_mesh_object(f"{tag}_channels_isolated", V, F, mat_dim, col)
         else:
-            segs = [(a_pos[i] + off, a_pos[j] + off) for i, j in channel_pairs]
+            segs = drop_vertical([(a_pos[i] + off, a_pos[j] + off)
+                                  for i, j in channel_pairs], stack_axis)
             V, F = blob_cylinders(segs, CHANNEL_RADIUS)
             add_mesh_object(f"{tag}_channels", V, F, mat_chan, col)
 
     # ---------------- faint guide over the whole A lattice ----------------
     if SHOW_LATTICE_GUIDE:
         pairs, _ = a_site_neighbors(a_pos)
-        segs = [(a_pos[i] + off, a_pos[j] + off) for i, j in pairs]
+        segs = drop_vertical([(a_pos[i] + off, a_pos[j] + off)
+                              for i, j in pairs], stack_axis)
         V, F = blob_cylinders(segs, GUIDE_RADIUS)
         add_mesh_object(f"{tag}_A_lattice_guide", V, F, mat_guide, col)
 
@@ -1069,12 +1205,72 @@ def _set_render_engine(scene, name):
     return scene.render.engine
 
 
+def _mix(c1, c2, t):
+    return tuple(a + (b - a) * t for a, b in zip(c1, c2))
+
+
+def background_gradient_image(name, bottom, top, height=512):
+    """
+    A 4 x `height` float image holding the vertical background gradient.
+
+    Painting the gradient into an image and compositing it behind the render
+    is the one approach that works for every camera: a world-space gradient
+    collapses under an orthographic camera, because every view ray then points
+    the same way and the world shader has nothing left to vary over.
+    """
+    img = bpy.data.images.get(name)
+    if img:
+        bpy.data.images.remove(img)
+    img = bpy.data.images.new(name, 4, height, alpha=True, float_buffer=True)
+    flat = []
+    for row in range(height):                    # row 0 is the bottom row
+        r, g, b = _mix(bottom, top, row / (height - 1.0))
+        flat.extend((r, g, b, 1.0) * 4)
+    try:
+        img.pixels.foreach_set(flat)
+    except Exception:
+        img.pixels = flat
+    return img
+
+
+def setup_compositor(scene, bottom, top):
+    """Lay the rendered image, alpha and all, over the gradient."""
+    scene.use_nodes = True
+    nt = scene.node_tree
+    nt.nodes.clear()
+
+    rl = nt.nodes.new("CompositorNodeRLayers")
+    rl.location = (-500, 100)
+    img = nt.nodes.new("CompositorNodeImage")
+    img.location = (-500, -220)
+    img.image = background_gradient_image("BackgroundGradient", bottom, top)
+    scale = nt.nodes.new("CompositorNodeScale")
+    scale.location = (-280, -220)
+    try:
+        scale.space = "RENDER_SIZE"
+        scale.frame_method = "STRETCH"
+    except Exception:
+        pass
+    nt.links.new(img.outputs["Image"], scale.inputs["Image"])
+
+    over = nt.nodes.new("CompositorNodeAlphaOver")
+    over.location = (-40, 0)
+    nt.links.new(scale.outputs["Image"], over.inputs[1])      # background
+    nt.links.new(rl.outputs["Image"], over.inputs[2])         # foreground
+
+    comp = nt.nodes.new("CompositorNodeComposite")
+    comp.location = (200, 0)
+    nt.links.new(over.outputs["Image"], comp.inputs["Image"])
+
+
 def setup_render(scene):
     engine = _set_render_engine(scene, RENDER_ENGINE)
     r = scene.render
     r.resolution_x, r.resolution_y = RESOLUTION
     r.resolution_percentage = 100
-    r.film_transparent = bool(TRANSPARENT_BACKGROUND)
+    # "gradient" renders on a transparent film too and puts the blue back in
+    # the compositor, which is what lets the gradient be exact in screen space
+    r.film_transparent = BACKGROUND_MODE in ("transparent", "gradient")
 
     # RGBA is the part people miss: with the film transparent but the colour
     # mode left at RGB, the alpha channel is dropped on save and the
@@ -1112,9 +1308,10 @@ def setup_render(scene):
 
 def setup_world(scene):
     """
-    A neutral world used purely as ambient fill. On a transparent film the
-    world is never seen -- it only lights the atoms -- so it can stay on even
-    when the background has to come out empty.
+    In "flat" mode the world *is* the background, so it carries the blue and
+    doubles as a dim blue ambient. In the other two modes the film is
+    transparent and the world is never seen, so it is a neutral fill light at
+    AMBIENT_STRENGTH instead.
     """
     world = scene.world or bpy.data.worlds.new("World")
     scene.world = world
@@ -1122,12 +1319,12 @@ def setup_world(scene):
     bg = world.node_tree.nodes.get("Background")
     if not bg:
         return
-    if TRANSPARENT_BACKGROUND:
-        bg.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
-        bg.inputs["Strength"].default_value = AMBIENT_STRENGTH
-    else:
+    if BACKGROUND_MODE == "flat":
         bg.inputs["Color"].default_value = (*hex_to_linear(BACKGROUND_COLOR), 1.0)
         bg.inputs["Strength"].default_value = 1.0
+    else:
+        bg.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
+        bg.inputs["Strength"].default_value = AMBIENT_STRENGTH
 
 
 def _add_sun(scene, name, direction, energy, softness=0.25):
@@ -1189,12 +1386,23 @@ def setup_camera(scene, bounds):
 
 
 def setup_scene(bounds):
+    if BACKGROUND_MODE not in ("gradient", "flat", "transparent"):
+        raise ValueError("BACKGROUND_MODE must be 'gradient', 'flat' or "
+                         f"'transparent'; got {BACKGROUND_MODE!r}")
     scene = bpy.context.scene
     engine = setup_render(scene)
     setup_world(scene)
     if ADD_LIGHTS:
         setup_lights(scene)
     setup_camera(scene, bounds)
+    if BACKGROUND_MODE == "gradient":
+        try:
+            setup_compositor(scene, hex_to_linear(BACKGROUND_COLOR),
+                             hex_to_linear(BACKGROUND_TOP_COLOR))
+        except Exception as e:
+            print(f"[cucro2] background gradient skipped: {e}")
+    else:
+        scene.use_nodes = False
     return engine
 
 
@@ -1230,8 +1438,11 @@ def main():
           f"{COLORS['metal_site']}, host sites {COLORS['host_site']}. "
           "Switch the viewport to Material Preview to see the colours.")
     if SETUP_SCENE:
-        print(f"[cucro2] engine {engine}, background "
-              f"{'transparent (RGBA PNG)' if TRANSPARENT_BACKGROUND else BACKGROUND_COLOR}")
+        described = {"transparent": "transparent (RGBA PNG)",
+                     "flat": f"flat {BACKGROUND_COLOR}",
+                     "gradient": f"gradient {BACKGROUND_COLOR} -> "
+                                 f"{BACKGROUND_TOP_COLOR}"}[BACKGROUND_MODE]
+        print(f"[cucro2] engine {engine}, background {described}")
 
     if RENDER_NOW:
         if not OUTPUT_PATH:

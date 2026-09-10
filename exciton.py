@@ -38,9 +38,11 @@ gradients -- a real volume for the aura, a view-angle alpha falloff for the
 haloes -- rather than stacks of nested shells.
 
 SETUP_SCENE builds the camera, the render settings and a compositor Glare
-node for the bloom. With TRANSPARENT_BACKGROUND the film is transparent and
-the output is RGBA, and the compositor pushes the bloom into the alpha
-channel too, so the glow survives being composited over a slide.
+node for the bloom. BACKGROUND_MODE picks between a transparent RGBA film
+(the default, so this figure lays over the cucro2perc render), the deep blue
+field of Reference 1, and a flat colour. Whenever the film is transparent the
+compositor pushes the bloom into the alpha channel too, so the glow survives
+being composited instead of being clipped away.
 """
 
 import bpy
@@ -61,14 +63,14 @@ CENTER           = (0.0, 0.0, 0.0)
 ELECTRON_RADIUS  = 1.25
 HOLE_RADIUS      = 1.10
 
-# Colours as sRGB hex (sampled from the reference image).
-ELECTRON_COLOR   = "#F3724F"   # hot orange-red core
-ELECTRON_RIM     = "#FEC45A"   # warmer rim / glow
-HOLE_COLOR       = "#5FABF5"   # blue core
-HOLE_RIM         = "#7CC3F6"   # lighter blue glow
-FIELD_LINE_COLOR = "#FBDB8C"   # gold field lines
-BACKGROUND_COLOR = "#0A1430"   # world colour, used only when
-                               # TRANSPARENT_BACKGROUND is False
+# Colours as sRGB hex, sampled from Reference 1: a hot pink-red electron and
+# a bright cyan hole, which is the pairing that stays legible against the deep
+# blue field of that figure (the old blue hole disappeared into it).
+ELECTRON_COLOR   = "#EF4E7F"   # hot pink-red core
+ELECTRON_RIM     = "#FFA6C8"   # pale pink highlight
+HOLE_COLOR       = "#12C2FF"   # bright cyan core
+HOLE_RIM         = "#8FE6FF"   # pale cyan highlight
+FIELD_LINE_COLOR = "#FBDB8C"   # gold field lines, as in the reference
 
 ELECTRON_EMISSION = 1.5        # emission strength of each particle. Push
 HOLE_EMISSION     = 1.3        # these much past ~2.5 and the whole sphere
@@ -130,37 +132,68 @@ AURA_RESOLUTION      = (64, 32)   # (azimuthal, polar) segments of the shell
 
 # --- rings around the exciton ----------------------------------------------
 SHOW_RINGS           = True
-RING_MODE            = "equator"  # "equator" -> rings stacked along the pair
+RING_MODE            = "orbit"    # "orbit"   -> ellipses through the centre
+                                  #   in planes that contain the pair axis, so
+                                  #   each ring wraps the whole exciton
+                                  #   lengthways -- the loops of Reference 1.
+                                  #   RING_TILT turns those planes about the
+                                  #   axis so the rings cross.
+                                  # "equator" -> rings stacked along the pair
                                   #   axis, lying on the aura's surface like
-                                  #   lines of latitude.
-                                  # "orbit"   -> great-circle rings all
-                                  #   through the centre, fanned around the
-                                  #   axis like a textbook atom diagram.
-RING_COUNT           = 3
+                                  #   lines of latitude. Needs a camera above
+                                  #   the equator (CAMERA_ELEVATION) or they
+                                  #   are seen edge-on as straight lines.
+RING_COUNT           = 2
 RING_SPREAD          = 0.55       # "equator": outermost ring position, as a
                                   # fraction of the aura's half-length
-RING_SCALE           = 1.04       # ring size / aura size (>1 sits outside it)
-RING_TILT            = 0.0        # degrees. "equator": tips the rings off the
-                                  # axis. "orbit": angle between each ring's
-                                  # normal and the axis (0 -> uses 72 deg, so
-                                  # the rings do not all coincide).
-RING_TUBE_RADIUS     = 0.07
+RING_SCALE           = 1.00       # ring size / aura size: 1 puts the ring on
+                                  # the aura's own surface, >1 outside it
+RING_TILT            = 22.0       # degrees, measured from face-on to the
+                                  # camera. "orbit": rotates each ring's plane
+                                  # about the pair axis, so 0 is a flat
+                                  # ellipse in the image plane and 90 is
+                                  # edge-on (a straight line); around 20-30
+                                  # the near arc crosses before the particles
+                                  # and the far arc behind. Further rings are
+                                  # fanned from there toward edge-on without
+                                  # reaching it, so each one is turned a
+                                  # different amount and they cross.
+                                  # "equator": tips the ring toward the viewer.
+RING_TUBE_RADIUS     = 0.055
 RING_SEGMENTS        = 10         # cross-section resolution of the ring tube
 RING_RESOLUTION      = 192        # points around each ring
-RING_COLOR           = ""         # "" = gradient from the hole colour to the
-                                  # electron colour along the axis; or a hex
-                                  # string such as "#FBDB8C" for a flat colour
-RING_EMISSION        = 1.8
+RING_COLOR           = "#8FE4FF"  # pale cyan, as in Reference 1. Set to ""
+                                  # for a gradient running from the hole
+                                  # colour to the electron colour instead.
+RING_EMISSION        = 2.2
 RING_ALPHA           = 1.0        # <1 makes the rings translucent
 
 # --- scene / render ---------------------------------------------------------
 SETUP_SCENE            = True   # camera, render settings, and bloom
-TRANSPARENT_BACKGROUND = True   # render with an alpha channel, so the image
-                                # drops straight onto a slide
+BACKGROUND_MODE        = "transparent"
+                                # "transparent" -> alpha channel, so this
+                                #   render drops straight onto a slide or over
+                                #   the cucro2perc render. This is the overlay
+                                #   of the pair, so it defaults to
+                                #   transparent while cucro2perc carries the
+                                #   blue underneath it.
+                                # "gradient"    -> the same deep blue field as
+                                #   Reference 1, for using this figure on its
+                                #   own
+                                # "flat"        -> a single BACKGROUND_COLOR
+BACKGROUND_COLOR       = "#0A2A5E"  # deep blue, sampled from Reference 1
+BACKGROUND_TOP_COLOR   = "#12539E"  # brighter blue at the top of the gradient
+CAMERA_ELEVATION       = 20.0   # degrees above the plane through the pair.
+                                # A camera level with the pair sees an
+                                # "equator" ring exactly edge-on, as a straight
+                                # line; this is what opens the rings out into
+                                # ellipses.
 ADD_GLOW_COMPOSITOR    = True
 GLOW_IN_ALPHA          = True   # also push the bloom into the alpha channel;
                                 # without this the glow around the exciton is
-                                # invisible once the PNG is composited
+                                # invisible once the PNG is composited, and in
+                                # "gradient" mode it would not blend onto the
+                                # blue either
 GLOW_ALPHA_GAIN        = 1.6    # how strongly the bloom opens up the alpha
 RENDER_ENGINE          = "EEVEE"   # "EEVEE" or "CYCLES". Both render the
                                    # volumetric aura; Cycles is cleaner and
@@ -918,64 +951,83 @@ def build_aura(col, centre, axis):
     _enable_volumes()
 
 
-def _ring_points(k, long_axis, short_axis):
+def camera_basis(axis):
     """
-    Points of ring k in the local frame where the pair axis is +Z.
+    (toward-camera, screen-horizontal) unit vectors for the default camera.
 
-    "equator" puts ring k at height z on the aura's surface, so its radius is
-    the spheroid's own radius there and the ring hugs the aura like a line of
-    latitude. "orbit" builds a great circle of the unit sphere in a plane
-    tilted off the axis and then scales it by the spheroid, which lands the
-    ring on that same surface.
+    setup_camera places the camera along `side`, so `side` points from the
+    exciton at the viewer and `right` runs across the frame. Sharing this with
+    the ring builder is what lets a ring be aimed relative to the view: a ring
+    seen exactly edge-on renders as a straight line, which is the one
+    orientation worth avoiding.
+    """
+    ref = Vector((1.0, 0.0, 0.0))
+    if abs(axis.dot(ref)) > 0.9:
+        ref = Vector((0.0, 1.0, 0.0))
+    side = axis.cross(ref).normalized()
+    right = axis.cross(side).normalized()
+    return side, right
+
+
+def _ring_points(k, long_axis, short_axis, centre, axis):
+    """
+    World-space points of ring k.
+
+    "orbit": an ellipse in a plane that contains the pair axis -- semi-axis
+    `short` across the pair and `long` along it -- so the ring wraps the whole
+    exciton lengthways, as the loops do in the reference figure. RING_TILT
+    rotates that plane about the pair axis away from face-on: at 0 the ring is
+    a flat ellipse in the image plane with no depth to it, and at 90 it is
+    edge-on. Around 30 the near arc crosses in front of the particles and the
+    far arc behind them, which is what reads as a ring in three dimensions.
+
+    "equator": a circle perpendicular to the pair axis, sitting on the aura's
+    surface at its own height like a line of latitude. RING_TILT tips it
+    toward the viewer.
     """
     n = max(int(RING_RESOLUTION), 12)
     count = max(int(RING_COUNT), 1)
     L = long_axis * RING_SCALE
     S = short_axis * RING_SCALE
-    tilt = math.radians(RING_TILT)
+    side, right = camera_basis(axis)
     pts = []
 
     if RING_MODE == "orbit":
-        psi = 2.0 * pi * k / count
-        beta = tilt if abs(RING_TILT) > 1e-6 else math.radians(72.0)
-        nrm = Vector((sin(beta) * cos(psi), sin(beta) * sin(psi), cos(beta)))
-        e1 = nrm.cross(Vector((0.0, 0.0, 1.0)))
-        if e1.length < 1e-6:
-            e1 = nrm.cross(Vector((1.0, 0.0, 0.0)))
-        e1.normalize()
-        e2 = nrm.cross(e1).normalized()
+        # Fan the rings between RING_TILT and edge-on without ever
+        # reaching it. A meridian ellipse projects by |cos(gamma)|, so
+        # mirrored angles would draw the same outline twice -- the rings have
+        # to differ in how far they are turned, not in which way.
+        gamma = math.radians(RING_TILT + k * (90.0 - RING_TILT) / count)
+        across = right * cos(gamma) + side * sin(gamma)
         for i in range(n + 1):
             th = 2.0 * pi * i / n
-            u = e1 * cos(th) + e2 * sin(th)
-            pts.append(Vector((u.x * S, u.y * S, u.z * L)))
+            pts.append(centre + across * (S * cos(th)) + axis * (L * sin(th)))
     else:
-        if count == 1:
-            frac = 0.0
-        else:
-            frac = (-1.0 + 2.0 * k / (count - 1)) * RING_SPREAD
-        z = frac * L
+        frac = 0.0 if count == 1 else (-1.0 + 2.0 * k / (count - 1)) * RING_SPREAD
         r = S * sqrt(max(1.0 - min(abs(frac), 1.0) ** 2, 1e-4))
-        ca, sa = cos(tilt), sin(tilt)
+        tilt = math.radians(RING_TILT)
+        # tip the ring about the screen-horizontal axis, i.e. toward the viewer
+        up = axis * cos(tilt) + side * sin(tilt)
+        out = side * cos(tilt) - axis * sin(tilt)
+        base = centre + up * (frac * L)
         for i in range(n + 1):
             th = 2.0 * pi * i / n
-            x, y0, z0 = r * cos(th), r * sin(th), z
-            pts.append(Vector((x, y0 * ca - z0 * sa, y0 * sa + z0 * ca)))
+            pts.append(base + right * (r * cos(th)) + out * (r * sin(th)))
     return pts
 
 
 def build_rings(col, centre, axis):
     """Rings encircling the exciton, as tubes swept around each ring path."""
     long_axis, short_axis = _aura_shape()
-    rot = Vector((0.0, 0.0, 1.0)).rotation_difference(axis).to_matrix()
     e_col = hex_to_linear(ELECTRON_RIM)
     h_col = hex_to_linear(HOLE_RIM)
     flat = hex_to_linear(RING_COLOR) if RING_COLOR else None
+    span = long_axis * RING_SCALE
 
     V, F, C = [], [], []
     for k in range(max(int(RING_COUNT), 1)):
-        local = _ring_points(k, long_axis, short_axis)
-        world = [(rot @ p) + centre for p in local]
-        v, f, _ = tube_from_polyline(world, RING_TUBE_RADIUS, RING_SEGMENTS)
+        pts = _ring_points(k, long_axis, short_axis, centre, axis)
+        v, f, _ = tube_from_polyline(pts, RING_TUBE_RADIUS, RING_SEGMENTS)
         if not v:
             continue
         base = len(V)
@@ -984,9 +1036,8 @@ def build_rings(col, centre, axis):
         if flat is None:
             # colour every ring vertex by where it sits along the pair axis:
             # the hole's colour at one end, the electron's at the other
-            span = long_axis * RING_SCALE
-            for p in local:
-                t = min(max(0.5 + 0.5 * p.z / span, 0.0), 1.0)
+            for p in pts:
+                t = min(max(0.5 + 0.5 * (p - centre).dot(axis) / span, 0.0), 1.0)
                 C.extend([mix(h_col, e_col, t)] * RING_SEGMENTS)
 
     if not V:
@@ -1046,7 +1097,9 @@ def setup_render(scene):
     r = scene.render
     r.resolution_x, r.resolution_y = RESOLUTION
     r.resolution_percentage = 100
-    r.film_transparent = bool(TRANSPARENT_BACKGROUND)
+    # "gradient" renders on a transparent film too and puts the blue back in
+    # the compositor, which is what lets the gradient be exact in screen space
+    r.film_transparent = BACKGROUND_MODE in ("transparent", "gradient")
 
     # PNG + RGBA: without the RGBA colour mode the alpha channel is thrown
     # away on save and the background comes out black
@@ -1090,25 +1143,29 @@ def setup_world(scene):
     world.use_nodes = True
     bg = world.node_tree.nodes.get("Background")
     if bg:
-        if TRANSPARENT_BACKGROUND:
+        if BACKGROUND_MODE == "flat":
+            bg.inputs["Color"].default_value = (
+                *hex_to_linear(BACKGROUND_COLOR), 1.0)
+            bg.inputs["Strength"].default_value = 1.0
+        else:
             # the film hides the world anyway; killing its strength keeps it
             # from tinting the volumetric aura
             bg.inputs["Color"].default_value = (0.0, 0.0, 0.0, 1.0)
             bg.inputs["Strength"].default_value = 0.0
-        else:
-            bg.inputs["Color"].default_value = (
-                *hex_to_linear(BACKGROUND_COLOR), 1.0)
-            bg.inputs["Strength"].default_value = 1.0
 
 
 def setup_camera(scene, centre, axis):
+    """
+    Look at the pair from side-on, raised CAMERA_ELEVATION degrees above the
+    plane through it. The elevation is what opens the rings out: from dead
+    level, a ring whose plane is perpendicular to the view is seen edge-on and
+    renders as a straight line.
+    """
     long_axis, _ = _aura_shape()
-    ref = Vector((1.0, 0.0, 0.0))
-    if abs(axis.dot(ref)) > 0.9:
-        ref = Vector((0.0, 1.0, 0.0))
-    side = axis.cross(ref).normalized()
+    side, _ = camera_basis(axis)
     dist = long_axis * 3.2
-    loc = centre + side * dist + axis * (long_axis * 0.15)
+    elev = math.radians(CAMERA_ELEVATION)
+    loc = centre + side * (dist * cos(elev)) + axis * (dist * sin(elev))
 
     cam_data = bpy.data.cameras.new("ExcitonCamera")
     cam = bpy.data.objects.new("ExcitonCamera", cam_data)
@@ -1120,10 +1177,35 @@ def setup_camera(scene, centre, axis):
     return cam
 
 
+def background_gradient_image(name, bottom, top, height=512):
+    """
+    A 4 x `height` float image holding the vertical background gradient.
+
+    Painting the gradient into an image and compositing it behind the render
+    is the one approach that works for every camera and every engine: a
+    world-space gradient has nothing to vary over under an orthographic
+    camera, and the compositor has no texture-coordinate node of its own.
+    """
+    img = bpy.data.images.get(name)
+    if img:
+        bpy.data.images.remove(img)
+    img = bpy.data.images.new(name, 4, height, alpha=True, float_buffer=True)
+    flat = []
+    for row in range(height):                    # row 0 is the bottom row
+        r, g, b = mix(bottom, top, row / (height - 1.0))
+        flat.extend((r, g, b, 1.0) * 4)
+    try:
+        img.pixels.foreach_set(flat)
+    except Exception:
+        img.pixels = flat
+    return img
+
+
 def setup_compositor(scene):
     """
-    Glare for the bloom -- and, on a transparent film, a second pass that
-    folds the bloom into the alpha channel.
+    Glare for the bloom; on a transparent film, a second pass that folds the
+    bloom into the alpha channel; and in "gradient" mode a final pass that
+    lays the result over the blue background.
 
     Glare only adds colour; it does not touch alpha. On a transparent film
     every pixel of glow outside the geometry therefore keeps alpha = 0 and
@@ -1140,25 +1222,27 @@ def setup_compositor(scene):
     comp = nt.nodes.new("CompositorNodeComposite")
     comp.location = (500, 0)
 
-    glare = nt.nodes.new("CompositorNodeGlare")
-    glare.location = (-250, 0)
-    for gt in ("BLOOM", "FOG_GLOW"):
-        try:
-            glare.glare_type = gt
-            break
-        except Exception:
-            continue
-    for attr, val in (("quality", "HIGH"), ("mix", 0.1),
-                      ("threshold", 0.6), ("size", 8)):
-        if hasattr(glare, attr):
+    image_out = rl.outputs["Image"]
+    if ADD_GLOW_COMPOSITOR:
+        glare = nt.nodes.new("CompositorNodeGlare")
+        glare.location = (-250, 0)
+        for gt in ("BLOOM", "FOG_GLOW"):
             try:
-                setattr(glare, attr, val)
+                glare.glare_type = gt
+                break
             except Exception:
-                pass
-    nt.links.new(rl.outputs["Image"], glare.inputs["Image"])
-    image_out = glare.outputs["Image"]
+                continue
+        for attr, val in (("quality", "HIGH"), ("mix", 0.1),
+                          ("threshold", 0.6), ("size", 8)):
+            if hasattr(glare, attr):
+                try:
+                    setattr(glare, attr, val)
+                except Exception:
+                    pass
+        nt.links.new(rl.outputs["Image"], glare.inputs["Image"])
+        image_out = glare.outputs["Image"]
 
-    if TRANSPARENT_BACKGROUND and GLOW_IN_ALPHA:
+    if scene.render.film_transparent and GLOW_IN_ALPHA:
         try:
             bw = nt.nodes.new("CompositorNodeRGBToBW")
             bw.location = (-60, -220)
@@ -1189,19 +1273,45 @@ def setup_compositor(scene):
         except Exception as e:
             print(f"[exciton] glow-in-alpha skipped: {e}")
 
+    if BACKGROUND_MODE == "gradient":
+        gradient = nt.nodes.new("CompositorNodeImage")
+        gradient.location = (60, -420)
+        gradient.image = background_gradient_image(
+            "ExcitonBackground", hex_to_linear(BACKGROUND_COLOR),
+            hex_to_linear(BACKGROUND_TOP_COLOR))
+        scale = nt.nodes.new("CompositorNodeScale")
+        scale.location = (240, -420)
+        try:
+            scale.space = "RENDER_SIZE"
+            scale.frame_method = "STRETCH"
+        except Exception:
+            pass
+        nt.links.new(gradient.outputs["Image"], scale.inputs["Image"])
+
+        over = nt.nodes.new("CompositorNodeAlphaOver")
+        over.location = (420, -160)
+        nt.links.new(scale.outputs["Image"], over.inputs[1])   # background
+        nt.links.new(image_out, over.inputs[2])                # foreground
+        image_out = over.outputs["Image"]
+
     nt.links.new(image_out, comp.inputs["Image"])
 
 
 def setup_scene(centre, axis):
+    if BACKGROUND_MODE not in ("gradient", "flat", "transparent"):
+        raise ValueError("BACKGROUND_MODE must be 'gradient', 'flat' or "
+                         f"'transparent'; got {BACKGROUND_MODE!r}")
     scene = bpy.context.scene
     engine = setup_render(scene)
     setup_world(scene)
     setup_camera(scene, centre, axis)
-    if ADD_GLOW_COMPOSITOR:
+    if ADD_GLOW_COMPOSITOR or BACKGROUND_MODE == "gradient":
         try:
             setup_compositor(scene)
         except Exception as e:
             print(f"[exciton] compositor skipped: {e}")
+    else:
+        scene.use_nodes = False
     return engine
 
 
@@ -1255,8 +1365,11 @@ def main():
           f"({r_electron.x:.2f}, {r_electron.y:.2f}, {r_electron.z:.2f}), "
           f"hole at ({r_hole.x:.2f}, {r_hole.y:.2f}, {r_hole.z:.2f}).")
     if SETUP_SCENE:
-        print(f"[exciton] engine {engine}, background "
-              f"{'transparent (RGBA)' if TRANSPARENT_BACKGROUND else BACKGROUND_COLOR}")
+        described = {"transparent": "transparent (RGBA PNG)",
+                     "flat": f"flat {BACKGROUND_COLOR}",
+                     "gradient": f"gradient {BACKGROUND_COLOR} -> "
+                                 f"{BACKGROUND_TOP_COLOR}"}[BACKGROUND_MODE]
+        print(f"[exciton] engine {engine}, background {described}")
     print("[exciton] The aura is a volume: use Rendered shading (not Material "
           "Preview) to see it.")
 
