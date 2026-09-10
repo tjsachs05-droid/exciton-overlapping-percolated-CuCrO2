@@ -35,6 +35,9 @@ Notes
 * If CIF_PATH does not exist, a built-in CuCrO2 structure is used instead, so
   the script always runs.
 * Transparency shows in Material Preview or Rendered viewport shading.
+* SETUP_SCENE adds a camera, lights and render settings. The film is
+  transparent by default and the output is RGBA, so the rendered PNG can be
+  layered straight over a PowerPoint slide.
 """
 
 import bpy
@@ -133,10 +136,35 @@ MAX_BOND_LENGTH  = 2.4       # hard cutoff for chemical bonds (A)
 MIN_BOND_LENGTH  = 0.40
 NEIGHBOR_TOL     = 0.25      # tolerance (A) for "in-plane nearest neighbour"
 PLANE_TOL        = 0.30      # tolerance (A) for grouping atoms into a plane
-SPHERE_SEGMENTS  = 20
-SPHERE_RINGS     = 14
-CYL_SEGMENTS     = 10
+SPHERE_SEGMENTS  = 32
+SPHERE_RINGS     = 24
+CYL_SEGMENTS     = 16
 CLEAR_SCENE      = True
+
+# --- scene / render ----------------------------------------------------------
+SETUP_SCENE            = True   # camera, lights and render settings
+TRANSPARENT_BACKGROUND = True   # render with an alpha channel, so the image
+                                # drops straight onto a slide
+BACKGROUND_COLOR       = "#FFFFFF"  # only used when TRANSPARENT_BACKGROUND
+                                    # is False
+ORTHOGRAPHIC           = True   # the usual choice for a structure figure:
+                                # no perspective convergence across the sheet
+CAMERA_MARGIN          = 1.06   # >1 leaves a little air around the structure
+AMBIENT_STRENGTH       = 0.35   # world light. It only lights the atoms; the
+                                # world itself stays invisible on a
+                                # transparent film.
+ADD_LIGHTS             = True   # key/fill/rim suns, so the atoms are shaded
+                                # spheres rather than flat silhouettes
+KEY_LIGHT_ENERGY       = 4.0
+RENDER_ENGINE          = "EEVEE"    # "EEVEE" or "CYCLES"
+RESOLUTION             = (2600, 2000)
+RENDER_SAMPLES         = 128
+VIEW_TRANSFORM         = "Standard"   # "Standard" keeps the colours exactly
+                                      # as sampled above, which is what a
+                                      # structure figure wants; "AgX" or
+                                      # "Filmic" tone-map them photographically
+OUTPUT_PATH            = ""     # e.g. r"C:\figures\percolation.png"
+RENDER_NOW             = False  # True = render straight to OUTPUT_PATH
 
 # ============================================================================
 #  Built-in CuCrO2 structure (used if CIF_PATH is missing)
@@ -784,7 +812,7 @@ def cylinder_geometry(radius, segs):
 
 def clear_scene():
     for obj in list(bpy.data.objects):
-        if obj.type == "MESH":
+        if obj.type in {"MESH", "CAMERA", "LIGHT"}:
             bpy.data.objects.remove(obj, do_unlink=True)
     for m in list(bpy.data.meshes):
         if m.users == 0:
@@ -1006,7 +1034,168 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
         add_mesh_object(f"{tag}_A_lattice_guide", V, F, mat_guide, col)
 
     width = (max(p.x for p in a_pos) - min(p.x for p in a_pos)) if a_pos else 0.0
-    return width
+
+    # bounds of everything drawn in this panel, padded by the largest display
+    # radius, so the camera can frame the whole series
+    pad = max(list(RADII.values()) + [DEFAULT_RADIUS])
+    pts = [p + off for _, p in atoms]
+    bounds = (min(p.x for p in pts) - pad, max(p.x for p in pts) + pad,
+              min(p.y for p in pts) - pad, max(p.y for p in pts) + pad,
+              min(p.z for p in pts) - pad, max(p.z for p in pts) + pad)
+    return width, bounds
+
+
+# ============================================================================
+#  Camera, lights and render settings
+# ============================================================================
+
+def _set_render_engine(scene, name):
+    """Set the engine by identifier; the EEVEE one is renamed between releases."""
+    wanted = {"EEVEE": ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"),
+              "CYCLES": ("CYCLES",)}.get(str(name).upper(), (str(name),))
+    try:
+        available = {i.identifier for i in
+                     scene.render.bl_rna.properties["engine"].enum_items}
+    except Exception:
+        available = set()
+    for ident in wanted:
+        if available and ident not in available:
+            continue
+        try:
+            scene.render.engine = ident
+            return ident
+        except Exception:
+            continue
+    return scene.render.engine
+
+
+def setup_render(scene):
+    engine = _set_render_engine(scene, RENDER_ENGINE)
+    r = scene.render
+    r.resolution_x, r.resolution_y = RESOLUTION
+    r.resolution_percentage = 100
+    r.film_transparent = bool(TRANSPARENT_BACKGROUND)
+
+    # RGBA is the part people miss: with the film transparent but the colour
+    # mode left at RGB, the alpha channel is dropped on save and the
+    # background comes back black.
+    try:
+        r.image_settings.file_format = "PNG"
+        r.image_settings.color_mode = "RGBA"
+        r.image_settings.color_depth = "16"
+    except Exception:
+        pass
+
+    if engine == "CYCLES":
+        try:
+            scene.cycles.samples = RENDER_SAMPLES
+            scene.cycles.use_denoising = True
+        except Exception:
+            pass
+    else:
+        for attr in ("taa_render_samples", "taa_samples"):
+            if hasattr(scene.eevee, attr):
+                try:
+                    setattr(scene.eevee, attr, RENDER_SAMPLES)
+                except Exception:
+                    pass
+    if VIEW_TRANSFORM:
+        try:
+            scene.view_settings.view_transform = VIEW_TRANSFORM
+        except Exception as e:
+            print(f"[cucro2] view transform {VIEW_TRANSFORM!r} not available: {e}")
+
+    if OUTPUT_PATH:
+        r.filepath = os.path.abspath(os.path.expanduser(OUTPUT_PATH))
+    return engine
+
+
+def setup_world(scene):
+    """
+    A neutral world used purely as ambient fill. On a transparent film the
+    world is never seen -- it only lights the atoms -- so it can stay on even
+    when the background has to come out empty.
+    """
+    world = scene.world or bpy.data.worlds.new("World")
+    scene.world = world
+    world.use_nodes = True
+    bg = world.node_tree.nodes.get("Background")
+    if not bg:
+        return
+    if TRANSPARENT_BACKGROUND:
+        bg.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
+        bg.inputs["Strength"].default_value = AMBIENT_STRENGTH
+    else:
+        bg.inputs["Color"].default_value = (*hex_to_linear(BACKGROUND_COLOR), 1.0)
+        bg.inputs["Strength"].default_value = 1.0
+
+
+def _add_sun(scene, name, direction, energy, softness=0.25):
+    data = bpy.data.lights.new(name, "SUN")
+    data.energy = energy
+    try:
+        data.angle = softness
+    except Exception:
+        pass
+    obj = bpy.data.objects.new(name, data)
+    scene.collection.objects.link(obj)
+    d = Vector(direction).normalized()
+    obj.rotation_euler = d.to_track_quat("-Z", "Y").to_euler()
+    return obj
+
+
+def setup_lights(scene):
+    """Key, fill and rim -- enough to make the spheres read as spheres."""
+    _add_sun(scene, "Key", (-0.5, -0.7, -1.0), KEY_LIGHT_ENERGY)
+    _add_sun(scene, "Fill", (0.8, 0.4, -0.6), KEY_LIGHT_ENERGY * 0.35)
+    _add_sun(scene, "Rim", (0.1, 0.9, -0.25), KEY_LIGHT_ENERGY * 0.45)
+
+
+def setup_camera(scene, bounds):
+    """
+    Look straight down the view direction (build_supercell has already rotated
+    the crystal so VIEW_DIRECTION points along +Z) and frame every panel.
+    """
+    x0, x1, y0, y1, z0, z1 = bounds
+    cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
+    w, h = max(x1 - x0, 1e-6), max(y1 - y0, 1e-6)
+
+    res_x, res_y = RESOLUTION
+    aspect = res_x / float(res_y)
+    # ortho_scale spans the longer image axis, so the other one has to be
+    # converted through the aspect ratio before taking the maximum
+    span = max(w, h * aspect) if aspect >= 1.0 else max(h, w / aspect)
+    span *= CAMERA_MARGIN
+
+    cam_data = bpy.data.cameras.new("CuCrO2Camera")
+    depth = max(z1 - z0, 1.0)
+    if ORTHOGRAPHIC:
+        cam_data.type = "ORTHO"
+        cam_data.ortho_scale = span
+        dist = depth * 2.0 + 10.0
+    else:
+        cam_data.type = "PERSP"
+        cam_data.lens = 50.0
+        dist = 0.5 * span * cam_data.lens / 18.0 + depth
+    cam_data.clip_start = 0.1
+    cam_data.clip_end = dist + depth * 4.0 + 100.0
+
+    cam = bpy.data.objects.new("CuCrO2Camera", cam_data)
+    scene.collection.objects.link(cam)
+    cam.location = (cx, cy, z1 + dist)
+    cam.rotation_euler = (0.0, 0.0, 0.0)      # default camera looks down -Z
+    scene.camera = cam
+    return cam
+
+
+def setup_scene(bounds):
+    scene = bpy.context.scene
+    engine = setup_render(scene)
+    setup_world(scene)
+    if ADD_LIGHTS:
+        setup_lights(scene)
+    setup_camera(scene, bounds)
+    return engine
 
 
 # ============================================================================
@@ -1022,15 +1211,41 @@ def main():
     rng = random.Random(RANDOM_SEED)
 
     x_off = 0.0
+    box = None
     for n, x in enumerate(comps):
         if not 0.0 <= x <= 1.0:
             raise ValueError(f"composition must be between 0 and 1; got {x}")
-        width = build_panel(struct, x, n + 1, x_off, rng)
+        width, bounds = build_panel(struct, x, n + 1, x_off, rng)
+        box = bounds if box is None else (
+            min(box[0], bounds[0]), max(box[1], bounds[1]),
+            min(box[2], bounds[2]), max(box[3], bounds[3]),
+            min(box[4], bounds[4]), max(box[5], bounds[5]))
         x_off += width + PANEL_GAP
+
+    engine = None
+    if SETUP_SCENE and box is not None:
+        engine = setup_scene(box)
 
     print("\n[cucro2] Done. Metallic sites are coloured "
           f"{COLORS['metal_site']}, host sites {COLORS['host_site']}. "
           "Switch the viewport to Material Preview to see the colours.")
+    if SETUP_SCENE:
+        print(f"[cucro2] engine {engine}, background "
+              f"{'transparent (RGBA PNG)' if TRANSPARENT_BACKGROUND else BACKGROUND_COLOR}")
+
+    if RENDER_NOW:
+        if not OUTPUT_PATH:
+            print("[cucro2] RENDER_NOW is on but OUTPUT_PATH is empty; "
+                  "nothing was written.")
+        else:
+            path = os.path.abspath(os.path.expanduser(OUTPUT_PATH))
+            folder = os.path.dirname(path)
+            if folder and not os.path.isdir(folder):
+                os.makedirs(folder, exist_ok=True)
+            bpy.context.scene.render.filepath = path
+            print(f"[cucro2] rendering to {path} ...")
+            bpy.ops.render.render(write_still=True)
+            print("[cucro2] render written.")
 
 
 main()
