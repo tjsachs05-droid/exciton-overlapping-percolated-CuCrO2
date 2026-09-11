@@ -24,8 +24,15 @@ finds the connected clusters of metallic sites (6 in-plane nearest neighbours
 at distance a), reports whether a cluster spans the sample, and can draw the
 "metallic channel" network as cylinders between adjacent metallic sites.
 
-Set COMPOSITION_SERIES to a list to build several panels side by side (e.g.
-[0.35, 0.5, 1.0]) and watch the network connect up across the threshold.
+By default the composition is not uniform: COMPOSITION_GRADIENT ramps x
+across the sheet, from no substitution at one end through 0.5 in the middle
+to complete replacement at the other, so a single picture holds the
+insulator, the threshold and the metal. Set COMPOSITION_GRADIENT = False and
+COMPOSITION_SERIES to a list to go back to several uniform panels side by
+side instead.
+
+The sheet is the three-layer sandwich CrO2 | Cu/Pd | CrO2: one A-plane with a
+complete CrO2 slab above and below it (N_A_PLANES and CRO2_CAPS).
 
 Notes
 -----
@@ -37,7 +44,8 @@ Notes
 * Transparency shows in Material Preview or Rendered viewport shading.
 * SETUP_SCENE adds a camera, lights and render settings. BACKGROUND_MODE
   picks between the deep blue field of the reference figure, a flat colour,
-  and a transparent RGBA film for layering the render over a slide.
+  and a transparent RGBA film for layering the render over a slide. The
+  camera is a perspective one by default, looking down at CAMERA_ELEVATION.
 * LAYER_GAP pulls the Cu planes and the CrO2 slabs apart vertically, and
   SHOW_VERTICAL_BONDS drops the struts that run between them.
 """
@@ -58,15 +66,36 @@ from mathutils import Vector
 CIF_PATH = r"C:\path\to\CuCrO2.cif"     # <-- EDIT (falls back to built-in data)
 
 # --- supercell / orientation -------------------------------------------------
-N_CELLS        = (8, 8, 1)   # unit cells along a, b, c. Keep nz small: c = 17 A
+N_CELLS        = (16, 16, 1) # unit cells along a, b, c. Keep nz small: c = 17 A.
+                             # A composition gradient needs a wide sheet to
+                             # read -- with only a handful of sites per slice
+                             # the statistics are noise, not a ramp.
 VIEW_DIRECTION = "001"       # "001" looks down c (the figure's view); also
                              # accepts "100", "110", "111", etc.
 LATTICE_SCALE  = 1.0         # multiplies the CIF lattice parameters
 
 # --- percolation -------------------------------------------------------------
 A_SITE_ELEMENT   = "Cu"      # element on the A site that gets substituted
-METAL_FRACTION   = 0.50      # x: probability an A site is metallic (Pd-like)
+METAL_FRACTION   = 0.50      # x: probability an A site is metallic (Pd-like).
+                             # Used only when COMPOSITION_GRADIENT is off.
 RANDOM_SEED      = 1         # change for a different random configuration
+
+# --- composition gradient ----------------------------------------------------
+# Rather than one composition for the whole sheet, x can ramp across it: no
+# substitution at all on one side, half on the middle band -- which is exactly
+# the 2D triangular-lattice threshold p_c = 1/2 -- and complete replacement on
+# the other. One picture then shows the insulator, the threshold and the metal.
+COMPOSITION_GRADIENT  = True
+GRADIENT_AXIS         = "x"   # "x" or "y": which way the composition ramps
+GRADIENT_MIN          = 0.00  # x at the low end (left, for GRADIENT_AXIS "x")
+GRADIENT_MID          = 0.50  # x through the middle band
+GRADIENT_MAX          = 1.00  # x at the high end (right)
+GRADIENT_LEFT_BAND    = 0.22  # fraction of the width held flat at GRADIENT_MIN
+GRADIENT_MID_BAND     = 0.20  # fraction held flat at GRADIENT_MID, centred
+GRADIENT_RIGHT_BAND   = 0.22  # fraction held flat at GRADIENT_MAX
+GRADIENT_SMOOTH       = True  # ease the ramps between bands instead of a
+                              # straight line, so the bands blend in
+GRADIENT_REPORT_BANDS = 7     # slices the console report breaks the sheet into
                              # (None = different every run)
 COMPOSITION_SERIES = []      # e.g. [0.35, 0.50, 1.00] -> one panel per value,
                              # laid out along +X. Empty = single panel at
@@ -78,6 +107,10 @@ CONNECT_INTERLAYER = False   # False: clusters are strictly in-plane (2D, the
                              # True: also link metallic sites in adjacent
                              # A-planes (3D percolation, p_c is much lower).
 
+CRO2_CAPS  = True            # Keep a complete CrO2 slab on BOTH sides of the
+                             # A-plane, giving the three-layer sandwich
+                             # CrO2 | Cu/Pd | CrO2. With False, only the bare
+                             # A-plane(s) are kept.
 N_A_PLANES = 1               # How many A-planes to keep, counted from the
                              # bottom. The R-3m hexagonal cell stacks THREE
                              # A-planes per unit cell (ABC), which overlap
@@ -158,8 +191,9 @@ MAX_BOND_LENGTH  = 2.4       # hard cutoff for chemical bonds (A)
 MIN_BOND_LENGTH  = 0.40
 NEIGHBOR_TOL     = 0.25      # tolerance (A) for "in-plane nearest neighbour"
 PLANE_TOL        = 0.30      # tolerance (A) for grouping atoms into a plane
-SPHERE_SEGMENTS  = 32
-SPHERE_RINGS     = 24
+SPHERE_SEGMENTS  = 24        # a 16x16 sheet is ~1800 atoms, so the mesh cost
+SPHERE_RINGS     = 16        # per sphere matters; 24x16 is still smooth at
+                             # the size these render
 CYL_SEGMENTS     = 16
 CLEAR_SCENE      = True
 
@@ -178,8 +212,18 @@ BACKGROUND_MODE        = "gradient"
                                 #   instead if the slide itself is blue.
 BACKGROUND_COLOR       = "#0A2A5E"  # deep blue, sampled from Reference 1
 BACKGROUND_TOP_COLOR   = "#12539E"  # brighter blue at the top of the gradient
-ORTHOGRAPHIC           = True   # the usual choice for a structure figure:
-                                # no perspective convergence across the sheet
+ORTHOGRAPHIC           = False  # False gives a normal perspective camera,
+                                # which is what makes the three-layer sandwich
+                                # read as a solid rather than a flat pattern
+CAMERA_LENS            = 50.0   # focal length in mm, for the perspective camera
+CAMERA_ELEVATION       = 55.0   # degrees above the plane of the sheet. 90 is
+                                # straight down (a plan view, where the
+                                # sandwich is edge-on and invisible); lower
+                                # angles show its thickness.
+CAMERA_AZIMUTH         = -90.0  # degrees around the sheet, measured from +x.
+                                # -90 puts the camera on the -y side, which
+                                # lays the GRADIENT_AXIS left-to-right across
+                                # the frame.
 CAMERA_MARGIN          = 1.06   # >1 leaves a little air around the structure
 AMBIENT_STRENGTH       = 0.35   # world light. It only lights the atoms; the
                                 # world itself stays invisible on a
@@ -600,7 +644,7 @@ def build_supercell(struct):
                 for elem, (fx, fy, fz) in frac:
                     cart = (ix + fx) * va + (iy + fy) * vb + (iz + fz) * vc
                     atoms.append([elem, q @ cart])
-    atoms = _crop_to_a_planes(atoms)
+    atoms = _crop_to_layers(atoms)
 
     cx = sum(p[1].x for p in atoms) / len(atoms)
     cy = sum(p[1].y for p in atoms) / len(atoms)
@@ -610,20 +654,101 @@ def build_supercell(struct):
     return atoms, (va, vb, vc), stacking_axis(q, va, vb)
 
 
-def _crop_to_a_planes(atoms):
-    """Keep only the lowest N_A_PLANES A-planes (and the O/B layers around
-    them), so a top-down view shows one triangular A lattice rather than
-    three overlapping ones."""
+def _ease(u):
+    u = min(max(u, 0.0), 1.0)
+    return u * u * (3.0 - 2.0 * u) if GRADIENT_SMOOTH else u
+
+
+def gradient_fraction(t):
+    """
+    The metallic fraction at normalised position t across the sheet: 0 at the
+    low end of GRADIENT_AXIS, 1 at the high end.
+
+    Three flat bands -- GRADIENT_MIN on the left, GRADIENT_MID through the
+    middle, GRADIENT_MAX on the right -- joined by ramps. The middle band is
+    the interesting one: at 0.5 it sits exactly on the 2D triangular-lattice
+    site-percolation threshold, so one sheet shows the insulator, the
+    threshold and the metal side by side.
+    """
+    t = min(max(t, 0.0), 1.0)
+    left = min(max(GRADIENT_LEFT_BAND, 0.0), 1.0)
+    right = min(max(GRADIENT_RIGHT_BAND, 0.0), 1.0)
+    mid = min(max(GRADIENT_MID_BAND, 0.0), 1.0)
+    mid_lo, mid_hi = 0.5 - 0.5 * mid, 0.5 + 0.5 * mid
+
+    if left > mid_lo or 1.0 - right < mid_hi:
+        raise ValueError(
+            "the gradient bands overlap: GRADIENT_LEFT_BAND and "
+            "GRADIENT_RIGHT_BAND must each leave room for half of "
+            f"GRADIENT_MID_BAND (left {left}, mid {mid}, right {right})")
+
+    if t <= left:
+        return GRADIENT_MIN
+    if t >= 1.0 - right:
+        return GRADIENT_MAX
+    if mid_lo <= t <= mid_hi:
+        return GRADIENT_MID
+    if t < mid_lo:
+        u = (t - left) / max(mid_lo - left, 1e-9)
+        return GRADIENT_MIN + (GRADIENT_MID - GRADIENT_MIN) * _ease(u)
+    u = (t - mid_hi) / max((1.0 - right) - mid_hi, 1e-9)
+    return GRADIENT_MID + (GRADIENT_MAX - GRADIENT_MID) * _ease(u)
+
+
+def site_fractions(a_positions, x_metal):
+    """
+    Target metallic fraction for every A site, and where each site sits across
+    the sheet (0..1 along GRADIENT_AXIS). Without a gradient every site gets
+    the same fraction and the position is only used for the report.
+    """
+    if GRADIENT_AXIS not in ("x", "y"):
+        raise ValueError(f"GRADIENT_AXIS must be 'x' or 'y'; got {GRADIENT_AXIS!r}")
+    vals = [getattr(p, GRADIENT_AXIS) for p in a_positions]
+    lo, hi = (min(vals), max(vals)) if vals else (0.0, 1.0)
+    span = max(hi - lo, 1e-9)
+    where = [(v - lo) / span for v in vals]
+    if x_metal is None:
+        return [gradient_fraction(t) for t in where], where
+    return [x_metal] * len(a_positions), where
+
+
+def _crop_to_layers(atoms):
+    """
+    Keep N_A_PLANES A-planes and, with CRO2_CAPS on, the complete CrO2 slab on
+    either side of them -- the three-layer sandwich CrO2 | Cu/Pd | CrO2.
+
+    The cuts run just inside the neighbouring A-planes rather than midway to
+    them. An O-Cr-O slab sits centred between two A-planes, so a cut at the
+    midpoint would slice the slab in half and leave one of its oxygen sheets
+    behind.
+
+    The kept planes are taken from the middle of the stack, so there is a
+    neighbouring plane on both sides to cut against.
+    """
     if not N_A_PLANES:
         return atoms
-    a_z = sorted({round(p.z / PLANE_TOL) * PLANE_TOL
-                  for e, p in atoms if e == A_SITE_ELEMENT})
-    if len(a_z) <= N_A_PLANES:
+    levels = sorted({round(p.z / PLANE_TOL) * PLANE_TOL
+                     for e, p in atoms if e == A_SITE_ELEMENT})
+    keep = max(int(N_A_PLANES), 1)
+    if len(levels) < keep:
         return atoms
-    # cut just below the next A-plane, which keeps the complete O-B-O layer
-    # sandwiched above the last A-plane we are keeping
-    cutoff = a_z[N_A_PLANES] - PLANE_TOL
-    return [p for p in atoms if p[1].z <= cutoff]
+
+    start = max((len(levels) - keep) // 2, 0)
+    window = levels[start:start + keep]
+
+    if not CRO2_CAPS:
+        lo, hi = window[0] - PLANE_TOL, window[-1] + PLANE_TOL
+    else:
+        gaps = [levels[i + 1] - levels[i] for i in range(len(levels) - 1)]
+        spacing = min(gaps) if gaps else PLANE_TOL * 2
+        has_below, has_above = start > 0, start + keep < len(levels)
+        if not (has_below and has_above):
+            print("[cucro2] WARNING: not enough A-planes to cap both sides "
+                  "with a complete CrO2 slab -- raise N_CELLS[2].")
+        below = levels[start - 1] if has_below else window[0] - spacing
+        above = levels[start + keep] if has_above else window[-1] + spacing
+        lo, hi = below + PLANE_TOL, above - PLANE_TOL
+    return [p for p in atoms if lo <= p[1].z <= hi]
 
 
 def layer_groups(atoms, stack_axis):
@@ -1016,7 +1141,8 @@ def blob_cylinders(segments, radius):
 # ============================================================================
 
 def build_panel(struct, x_metal, panel_index, x_offset, rng):
-    tag = f"x{x_metal:.2f}".replace(".", "p")
+    """Build one sheet. x_metal is None when the composition ramps across it."""
+    tag = "gradient" if x_metal is None else f"x{x_metal:.2f}".replace(".", "p")
     col = get_collection(f"CuCrO2_{tag}")
     off = Vector((x_offset, 0.0, 0.0))
 
@@ -1029,7 +1155,8 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
                          "to one of these.")
     a_pos = [atoms[i][1] for i in a_idx]
 
-    is_metal = [rng.random() < x_metal for _ in a_idx]
+    target, where = site_fractions(a_pos, x_metal)
+    is_metal = [rng.random() < t for t in target]
     labels, clusters, channel_pairs, spanning, nn = percolation_analysis(a_pos, is_metal)
 
     # ---------------- report ----------------
@@ -1037,10 +1164,19 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
     n_m = sum(is_metal)
     n_planes = len({round(p.z / PLANE_TOL) for p in a_pos})
     per_plane = n_a / n_planes
-    biggest = max((len(v) for v in clusters.values()), default=0)
-    side = ("above threshold" if x_metal > 0.5 else
-            "below threshold" if x_metal < 0.5 else "at threshold")
-    print(f"\n--- panel {panel_index}: x = {x_metal:.3f} ({side}) ---")
+    biggest_id, biggest = None, 0
+    for cid, ids in clusters.items():
+        if len(ids) > biggest:
+            biggest_id, biggest = cid, len(ids)
+
+    if x_metal is None:
+        print(f"\n--- panel {panel_index}: composition gradient along "
+              f"{GRADIENT_AXIS}, x = {GRADIENT_MIN:.2f} -> {GRADIENT_MID:.2f} "
+              f"-> {GRADIENT_MAX:.2f} ---")
+    else:
+        side = ("above threshold" if x_metal > 0.5 else
+                "below threshold" if x_metal < 0.5 else "at threshold")
+        print(f"\n--- panel {panel_index}: x = {x_metal:.3f} ({side}) ---")
     print(f"  A-planes: {n_planes}   A sites: {n_a} ({per_plane:.0f} per plane)")
     print(f"  metallic: {n_m} (actual x = {n_m / n_a:.3f})")
     print(f"  in-plane A-A nearest-neighbour distance: {nn:.3f} A "
@@ -1052,6 +1188,9 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
     print(f"  spanning cluster: "
           f"{'YES -- percolating (metallic)' if spanning else 'no -- disconnected (insulating)'}")
     print("  2D triangular-lattice site percolation threshold: p_c = 0.5")
+
+    if x_metal is None:
+        _report_gradient(a_pos, where, target, is_metal, labels, biggest_id, nn)
 
     # ---------------- layer gap ----------------
     # Everything above ran on the true crystal geometry. Now that the bonds
@@ -1179,6 +1318,53 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
               min(p.y for p in pts) - pad, max(p.y for p in pts) + pad,
               min(p.z for p in pts) - pad, max(p.z for p in pts) + pad)
     return width, bounds
+
+
+def _report_gradient(a_pos, where, target, is_metal, labels, biggest_id, nn):
+    """
+    Break the sheet into slices along the gradient and report what each one
+    came out as. This is where the threshold shows: the slices below p_c hold
+    only small islands, and past it nearly every metallic site joins the one
+    cluster that runs across the sheet.
+    """
+    nb = max(int(GRADIENT_REPORT_BANDS), 1)
+    bands = [[] for _ in range(nb)]
+    for k, t in enumerate(where):
+        bands[min(int(t * nb), nb - 1)].append(k)
+
+    print(f"  composition across {GRADIENT_AXIS}, in {nb} slices:")
+    print("     slice     target x   actual x   metallic   in the largest cluster")
+    for b, ids in enumerate(bands):
+        if not ids:
+            continue
+        tgt = sum(target[k] for k in ids) / len(ids)
+        met = [k for k in ids if is_metal[k]]
+        act = len(met) / len(ids)
+        big = sum(1 for k in met if labels[k] == biggest_id)
+        share = (big / len(met) * 100.0) if met else 0.0
+        lo, hi = b / nb, (b + 1) / nb
+        print(f"     {lo:.2f}-{hi:.2f}   {tgt:8.3f}   {act:8.3f}   "
+              f"{len(met):4d}/{len(ids):<4d}  {big:4d} ({share:5.1f}%)")
+
+    # Which way the largest cluster reaches matters here in a way it does not
+    # for a uniform sheet: a gradient is expected to percolate ACROSS the
+    # ramp, over on the metallic side, while staying disconnected from the
+    # insulating end, so end-to-end spanning is not the interesting question.
+    ids = [k for k in range(len(a_pos)) if labels[k] == biggest_id]
+    if not ids:
+        return
+    edge = (nn or 1.0) * 0.75
+    for axis in ("x", "y"):
+        vals = [getattr(p, axis) for p in a_pos]
+        cvals = [getattr(a_pos[k], axis) for k in ids]
+        full = max(vals) - min(vals)
+        reach = max(cvals) - min(cvals)
+        spans = (min(cvals) <= min(vals) + edge and
+                 max(cvals) >= max(vals) - edge)
+        role = "along the gradient" if axis == GRADIENT_AXIS else "across it"
+        print(f"  largest cluster reaches {reach / max(full, 1e-9) * 100:5.1f}% "
+              f"of the sheet in {axis} ({role}): "
+              f"{'spans' if spans else 'does not span'}")
 
 
 # ============================================================================
@@ -1350,37 +1536,72 @@ def setup_lights(scene):
 
 def setup_camera(scene, bounds):
     """
-    Look straight down the view direction (build_supercell has already rotated
-    the crystal so VIEW_DIRECTION points along +Z) and frame every panel.
+    Frame the structure from CAMERA_ELEVATION degrees above its plane, at
+    CAMERA_AZIMUTH around it. build_supercell has already rotated the crystal
+    so that VIEW_DIRECTION points along +Z, which is the axis the elevation is
+    measured from.
+
+    The framing is exact rather than a guess. Project the eight corners of the
+    bounding box onto the camera's own right and up axes; those two components
+    do not change as the camera slides along its view direction, so each
+    corner sets a lower bound on the distance and the largest of them frames
+    the lot.
     """
     x0, x1, y0, y1, z0, z1 = bounds
-    cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
-    w, h = max(x1 - x0, 1e-6), max(y1 - y0, 1e-6)
+    target = Vector((0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (z0 + z1)))
+    corners = [Vector((x, y, z)) for x in (x0, x1)
+               for y in (y0, y1) for z in (z0, z1)]
+
+    elev = radians(min(max(CAMERA_ELEVATION, -89.0), 89.0))
+    azim = radians(CAMERA_AZIMUTH)
+    # unit vector from the structure toward the camera
+    eye = Vector((cos(elev) * cos(azim), cos(elev) * sin(azim), sin(elev)))
+    forward = -eye
+    right = forward.cross(Vector((0.0, 0.0, 1.0)))
+    right = right.normalized() if right.length > 1e-6 else Vector((1.0, 0.0, 0.0))
+    up = right.cross(forward).normalized()
 
     res_x, res_y = RESOLUTION
     aspect = res_x / float(res_y)
-    # ortho_scale spans the longer image axis, so the other one has to be
-    # converted through the aspect ratio before taking the maximum
-    span = max(w, h * aspect) if aspect >= 1.0 else max(h, w / aspect)
-    span *= CAMERA_MARGIN
 
     cam_data = bpy.data.cameras.new("CuCrO2Camera")
-    depth = max(z1 - z0, 1.0)
     if ORTHOGRAPHIC:
         cam_data.type = "ORTHO"
+        half_h = max(abs((c - target).dot(right)) for c in corners) * CAMERA_MARGIN
+        half_v = max(abs((c - target).dot(up)) for c in corners) * CAMERA_MARGIN
+        # ortho_scale spans the longer image axis, so convert the other one
+        # through the aspect ratio before taking the maximum
+        span = (max(2 * half_h, 2 * half_v * aspect) if aspect >= 1.0
+                else max(2 * half_v, 2 * half_h / aspect))
         cam_data.ortho_scale = span
-        dist = depth * 2.0 + 10.0
+        depth = max(abs((c - target).dot(forward)) for c in corners)
+        dist = depth * 2.0 + span
     else:
         cam_data.type = "PERSP"
-        cam_data.lens = 50.0
-        dist = 0.5 * span * cam_data.lens / 18.0 + depth
-    cam_data.clip_start = 0.1
-    cam_data.clip_end = dist + depth * 4.0 + 100.0
+        cam_data.lens = CAMERA_LENS
+        try:
+            cam_data.sensor_fit = "HORIZONTAL"     # makes the maths definite
+        except Exception:
+            pass
+        tan_h = 18.0 / max(CAMERA_LENS, 1e-3)      # 36 mm sensor, half-angle
+        tan_v = tan_h / aspect
+        dist = 0.0
+        for c in corners:
+            d = c - target
+            ahead = d.dot(forward)
+            dist = max(dist,
+                       abs(d.dot(right)) * CAMERA_MARGIN / tan_h - ahead,
+                       abs(d.dot(up)) * CAMERA_MARGIN / tan_v - ahead)
+        dist = max(dist, 1.0)
+
+    reach = max((c - target).length for c in corners)
+    cam_data.clip_start = max(0.01, (dist - reach) * 0.5)
+    cam_data.clip_end = dist + reach * 4.0 + 100.0
 
     cam = bpy.data.objects.new("CuCrO2Camera", cam_data)
     scene.collection.objects.link(cam)
-    cam.location = (cx, cy, z1 + dist)
-    cam.rotation_euler = (0.0, 0.0, 0.0)      # default camera looks down -Z
+    cam.location = target + eye * dist
+    cam.rotation_euler = forward.to_track_quat("-Z", "Y").to_euler()
     scene.camera = cam
     return cam
 
@@ -1415,13 +1636,19 @@ def main():
         clear_scene()
 
     struct = load_structure()
-    comps = COMPOSITION_SERIES if COMPOSITION_SERIES else [METAL_FRACTION]
+    if COMPOSITION_GRADIENT:
+        if COMPOSITION_SERIES:
+            print("[cucro2] COMPOSITION_GRADIENT is on, so COMPOSITION_SERIES "
+                  "is ignored: the gradient is one sheet, not a series.")
+        comps = [None]          # None means "ramp the composition across it"
+    else:
+        comps = COMPOSITION_SERIES if COMPOSITION_SERIES else [METAL_FRACTION]
     rng = random.Random(RANDOM_SEED)
 
     x_off = 0.0
     box = None
     for n, x in enumerate(comps):
-        if not 0.0 <= x <= 1.0:
+        if x is not None and not 0.0 <= x <= 1.0:
             raise ValueError(f"composition must be between 0 and 1; got {x}")
         width, bounds = build_panel(struct, x, n + 1, x_off, rng)
         box = bounds if box is None else (
@@ -1437,6 +1664,11 @@ def main():
     print("\n[cucro2] Done. Metallic sites are coloured "
           f"{COLORS['metal_site']}, host sites {COLORS['host_site']}. "
           "Switch the viewport to Material Preview to see the colours.")
+    if SETUP_SCENE:
+        print(f"[cucro2] camera: "
+              f"{'orthographic' if ORTHOGRAPHIC else f'{CAMERA_LENS:.0f} mm perspective'}"
+              f", {CAMERA_ELEVATION:.0f} deg above the sheet at "
+              f"{CAMERA_AZIMUTH:.0f} deg around it")
     if SETUP_SCENE:
         described = {"transparent": "transparent (RGBA PNG)",
                      "flat": f"flat {BACKGROUND_COLOR}",
