@@ -7,11 +7,11 @@ transparent backgrounds in PowerPoint.
 | script | draws |
 | --- | --- |
 | `cucro2perc.py` | the CuCrO2 delafossite lattice with the A-site sublattice coloured to show 2D site percolation (p_c = 1/2) |
-| `exciton.py` | an electron orbiting a hole, with a comet trail along its path, a cord of light bridging the pair, a volumetric aura, and rings |
+| `exciton.py` | a small electron orbiting a larger hole, with a Saturn-ring motion tail behind it and a volumetric aura between the two |
 
 Both take their palette from `Reference 1` in this repo: a deep blue field, a
-hot pink-red electron, a bright cyan hole, gold field lines and pale cyan
-rings.
+hot pink-red hole at the centre, a bright cyan electron going round it, pale
+cyan rings in the tail, and gold field lines.
 
 ## Running them
 
@@ -65,21 +65,21 @@ file as soon as it finishes building.
   the electron is on its circle around the hole and which way it travels.
   `ORBIT_PHASE` is measured from the right of frame, so 0 puts the electron
   at the right-hand edge of the path and 90 nearest the camera.
-* `ORBIT_TRAIL_LENGTH`, `ORBIT_TRAIL_FALLOFF`, `ORBIT_TRAIL_LEVEL` — the
-  comet trail streaming behind the electron. `ORBIT_PATH_LEVEL` sets how
-  brightly the rest of the loop shows; at 0 the circle is cut short and only
-  the trail is drawn.
-* `SHOW_CONNECTION` — the cord of light between hole and electron. This is
-  what keeps the two reading as bound with the field lines switched off.
+* The motion tail is a **band**, not a line: `TRAIL_STRANDS` concentric
+  strands lying flat in the orbit plane over `TRAIL_WIDTH`, like the rings of
+  Saturn. `TRAIL_LENGTH` and `TRAIL_FALLOFF` set how far back it reaches and
+  how fast it fades; `TRAIL_SHEAR` makes the outer strands trail longer so
+  the tail feathers out instead of ending on a straight edge;
+  `TRAIL_EDGE_FADE` dims the outer strands so the band has a bright spine.
+* `TRAIL_RING_LEVEL` sets how brightly the rest of each circle shows. At 0
+  the circles are cut short and only the tail is drawn.
 * `SHOW_FIELD_LINES` — the full dipole streamline bundle, off by default.
   The physics is unchanged; it is just no longer what carries the picture.
-* `SHOW_RINGS`, `RING_MODE`, `RING_COUNT`, `RING_TILT`, `RING_COLOR` — extra
-  rings around the exciton, on top of the electron's own path. `"orbit"` (the
-  default) puts them in planes containing the orbit normal so they cross the
-  path; `"equator"` stacks them parallel to the orbit plane.
+* `AURA_MARGIN` — the aura is a spindle sitting directly between the two
+  particles, so this is what makes it a tight bridge of light or a loose halo.
 * `CAMERA_ELEVATION` — how far above the orbit plane the camera sits. At 0
-  the electron's path is seen edge-on and renders as a straight line, so this
-  is what opens it out into an ellipse.
+  the tail is seen edge-on and renders as a straight line, so this is what
+  opens it out into an ellipse.
 
 `cucro2perc.py`
 
