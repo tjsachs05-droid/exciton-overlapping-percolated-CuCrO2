@@ -7,7 +7,7 @@ transparent backgrounds in PowerPoint.
 | script | draws |
 | --- | --- |
 | `cucro2perc.py` | the CuCrO2 delafossite lattice with the A-site sublattice coloured to show 2D site percolation (p_c = 1/2) |
-| `exciton.py` | a bound electron-hole pair with its real dipole field lines, a volumetric aura, and rings |
+| `exciton.py` | an electron orbiting a hole, with a comet trail along its path, a cord of light bridging the pair, a volumetric aura, and rings |
 
 Both take their palette from `Reference 1` in this repo: a deep blue field, a
 hot pink-red electron, a bright cyan hole, gold field lines and pale cyan
@@ -61,13 +61,25 @@ file as soon as it finishes building.
 * `ELECTRON_EMISSION` / `HOLE_EMISSION` — keep these below ~2.5; past that
   the sphere clips to white and the shading gradient disappears.
 * `AURA_DENSITY`, `AURA_FALLOFF`, `AURA_EMISSION` — the volumetric aura.
-* `SHOW_RINGS`, `RING_MODE`, `RING_COUNT`, `RING_TILT`, `RING_COLOR` — rings
-  encircling the pair. `"orbit"` (the default) wraps them lengthways around
-  the whole exciton, as in the reference; `"equator"` stacks them across the
-  pair axis like lines of latitude.
-* `CAMERA_ELEVATION` — how far above the pair the camera sits. At 0 a ring
-  seen edge-on renders as a straight line, so this is what opens the rings
-  out into ellipses.
+* `ORBIT_RADIUS`, `ORBIT_NORMAL`, `ORBIT_PHASE`, `ORBIT_DIRECTION` — where
+  the electron is on its circle around the hole and which way it travels.
+  `ORBIT_PHASE` is measured from the right of frame, so 0 puts the electron
+  at the right-hand edge of the path and 90 nearest the camera.
+* `ORBIT_TRAIL_LENGTH`, `ORBIT_TRAIL_FALLOFF`, `ORBIT_TRAIL_LEVEL` — the
+  comet trail streaming behind the electron. `ORBIT_PATH_LEVEL` sets how
+  brightly the rest of the loop shows; at 0 the circle is cut short and only
+  the trail is drawn.
+* `SHOW_CONNECTION` — the cord of light between hole and electron. This is
+  what keeps the two reading as bound with the field lines switched off.
+* `SHOW_FIELD_LINES` — the full dipole streamline bundle, off by default.
+  The physics is unchanged; it is just no longer what carries the picture.
+* `SHOW_RINGS`, `RING_MODE`, `RING_COUNT`, `RING_TILT`, `RING_COLOR` — extra
+  rings around the exciton, on top of the electron's own path. `"orbit"` (the
+  default) puts them in planes containing the orbit normal so they cross the
+  path; `"equator"` stacks them parallel to the orbit plane.
+* `CAMERA_ELEVATION` — how far above the orbit plane the camera sits. At 0
+  the electron's path is seen edge-on and renders as a straight line, so this
+  is what opens it out into an ellipse.
 
 `cucro2perc.py`
 

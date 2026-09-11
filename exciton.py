@@ -1,19 +1,27 @@
 """
 exciton.py
 ==========
-Blender script: a glowing exciton -- a bound electron-hole pair -- with real
-dipole field lines running between the two particles, shaded 3-D particles,
-a volumetric aura that fades smoothly from the core outward, and optional
-rings around the pair. Renders on a transparent background so the image can
-be dropped straight onto a PowerPoint slide.
+Blender script: a glowing exciton -- a bound electron-hole pair -- drawn as
+an electron in orbit around a hole. The electron's path is a comet trail that
+is hot and thick where the electron is and thins as it sweeps back round the
+loop, a cord of light bridges the two, and a volumetric aura hugs the orbit.
+The real dipole field lines between the pair are available too, as an option.
+Renders on a transparent background so the image can be dropped straight onto
+a PowerPoint slide.
 
 Run: Blender -> Scripting -> Open -> edit USER PARAMETERS -> Alt+P.
 
 What is actually being drawn
 ----------------------------
-The field lines are not decorative arcs: they are streamlines of the electric
-field of two equal and opposite point charges (+ at the hole, - at the
-electron), integrated with RK4 through
+The electron sits on a circle of radius ORBIT_RADIUS about the hole, at
+ORBIT_PHASE degrees around it. The path is one tube whose radius and colour
+both follow how far behind the electron each point is, so the trail swells
+and brightens into the electron and fades out behind it -- the rest of the
+loop stays as a faint guide at ORBIT_PATH_LEVEL.
+
+With SHOW_FIELD_LINES on, the field lines are not decorative arcs either:
+they are streamlines of the electric field of two equal and opposite point
+charges (+ at the hole, - at the electron), integrated with RK4 through
 
         E(r) = (r - r_h)/|r - r_h|^3  -  (r - r_e)/|r - r_e|^3
 
@@ -55,10 +63,17 @@ from mathutils import Vector, Matrix
 #  USER PARAMETERS
 # ============================================================================
 
-# --- the pair ---------------------------------------------------------------
-SEPARATION       = 6.0        # centre-to-centre distance (Blender units)
-AXIS_DIRECTION   = (0.0, 0.0, 1.0)   # electron sits at +axis, hole at -axis
-CENTER           = (0.0, 0.0, 0.0)
+# --- the pair: an electron in orbit around a hole ---------------------------
+CENTER           = (0.0, 0.0, 0.0)   # the hole sits here
+ORBIT_RADIUS     = 3.6        # how far the electron orbits from the hole
+ORBIT_NORMAL     = (0.0, 0.0, 1.0)   # the axis the electron circles about
+ORBIT_PHASE      = 40.0       # degrees around the orbit, measured from the
+                              # right of frame: 0 puts the electron at the
+                              # right-hand edge of the path, 90 nearest the
+                              # camera, 270 furthest behind the hole
+ORBIT_DIRECTION  = 1          # +1 or -1, which way round the electron
+                              # travels. The trail streams behind it either
+                              # way.
 
 ELECTRON_RADIUS  = 1.25
 HOLE_RADIUS      = 1.10
@@ -79,8 +94,40 @@ HOLE_EMISSION     = 1.3        # these much past ~2.5 and the whole sphere
                                # the first place -- the shading gradient has
                                # to stay inside the displayable range.
 
-# --- field lines ------------------------------------------------------------
-SHOW_FIELD_LINES     = True
+# --- the orbit path and its motion trail ------------------------------------
+SHOW_ORBIT_PATH      = True
+ORBIT_TUBE_RADIUS    = 0.10   # thickness of the path where the electron is
+ORBIT_RESOLUTION     = 320    # points around the loop
+ORBIT_SEGMENTS       = 8      # cross-section resolution of the path tube
+ORBIT_TRAIL_LENGTH   = 0.45   # fraction of the loop covered by the bright
+                              # trail streaming behind the electron
+ORBIT_TRAIL_FALLOFF  = 1.6    # >1 fades the trail out faster
+ORBIT_TRAIL_LEVEL    = 2.4    # brightness where the trail meets the electron
+ORBIT_PATH_LEVEL     = 0.35   # brightness of the rest of the loop -- the part
+                              # the electron has yet to travel. 0 leaves only
+                              # the comet trail and no closed circle.
+ORBIT_PATH_WIDTH     = 0.30   # thickness of that faint part, as a fraction of
+                              # ORBIT_TUBE_RADIUS
+ORBIT_PATH_COLOR     = "#8FE4FF"   # pale cyan, as in Reference 1
+ORBIT_EMISSION       = 2.0
+
+# --- the light bridging the pair --------------------------------------------
+SHOW_CONNECTION      = True   # a glowing cord from the hole to the electron.
+                              # This is what keeps the two reading as bound
+                              # when the field lines are switched off.
+CONNECTION_RADIUS    = 0.13
+CONNECTION_BULGE     = 0.45   # 0 = a straight cylinder, 1 = a thin spindle
+                              # that swells to full width at the middle
+CONNECTION_GLOW      = 2.2    # extra brightness at the middle of the cord
+CONNECTION_EMISSION  = 2.0
+CONNECTION_SEGMENTS  = 12
+CONNECTION_RESOLUTION = 64
+
+# --- field lines (optional) -------------------------------------------------
+SHOW_FIELD_LINES     = False  # the full dipole streamline bundle. Off by
+                              # default now that the orbit and the connecting
+                              # cord carry the picture; turn it on for the
+                              # physics-diagram version.
 FIELD_LINE_RINGS     = 7      # launch angles (rings of lines)
 FIELD_LINE_AZIMUTHS  = 18     # lines around the axis per ring
 FIELD_LINE_AXIS_BIAS = 2.6    # >1 pushes launch angles toward the axis, which
@@ -120,7 +167,12 @@ GLOW_EMISSION        = 1.8
 
 # --- aura enclosing the whole exciton (a single emissive volume) -----------
 SHOW_AURA            = True
-AURA_MARGIN          = 2.6        # how far the aura extends past the particles
+AURA_MARGIN          = 2.2        # how far the aura extends past the orbit
+AURA_FLATTEN         = 0.55       # the aura is an oblate blob: this is its
+                                  # thickness along the orbit normal as a
+                                  # fraction of its width in the orbit plane,
+                                  # so it hugs the orbit instead of
+                                  # ballooning around it
 AURA_DENSITY         = 0.25       # density at the core of the aura. This
                                   # and AURA_EMISSION multiply; too much
                                   # density hazes over the particles instead
@@ -146,8 +198,10 @@ RING_MODE            = "orbit"    # "orbit"   -> ellipses through the centre
 RING_COUNT           = 2
 RING_SPREAD          = 0.55       # "equator": outermost ring position, as a
                                   # fraction of the aura's half-length
-RING_SCALE           = 1.00       # ring size / aura size: 1 puts the ring on
-                                  # the aura's own surface, >1 outside it
+RING_SCALE           = 0.80       # ring size / aura size. The aura reaches
+                                  # well past the orbit, so a little under 1
+                                  # keeps the rings hugging the electron's
+                                  # path instead of riding the outer haze.
 RING_TILT            = 22.0       # degrees, measured from face-on to the
                                   # camera. "orbit": rotates each ring's plane
                                   # about the pair axis, so 0 is a flat
@@ -381,6 +435,10 @@ def tube_from_polyline(points, radius, segs, taper=0.0):
     Sweep a circular cross-section along a polyline using parallel transport,
     so the tube does not twist. Returns (verts, faces, param) where param is
     the 0..1 position along the line for each vertex (used for colouring).
+
+    `radius` is either one number for the whole tube or a radius per point,
+    which is what lets the orbit trail swell at the electron and thin out
+    behind it.
     """
     n = len(points)
     if n < 2:
@@ -428,12 +486,15 @@ def tube_from_polyline(points, radius, segs, taper=0.0):
             return 1.0
         return e * e * (3.0 - 2.0 * e)          # smoothstep
 
+    varying = not isinstance(radius, (int, float))
+
     verts, vparam = [], []
     for i in range(n):
         t = tangents[i]
         u = normals[i]
         w = t.cross(u).normalized()
-        r = radius * taper_scale(params[i])
+        r = (radius[min(i, len(radius) - 1)] if varying else radius)
+        r *= taper_scale(params[i])
         for j in range(segs):
             a = 2.0 * pi * j / segs
             p = points[i] + u * (r * cos(a)) + w * (r * sin(a))
@@ -760,12 +821,12 @@ def halo_material(name, inner_color, outer_color, strength, alpha, falloff):
     return mat
 
 
-def aura_volume_material(name, near_color, far_color, density, falloff,
+def aura_volume_material(name, core_color, edge_color, density, falloff,
                          strength):
     """
     Emissive volume whose density falls off from the centre of the aura to its
-    surface, tinted from the hole's colour at one end of the pair axis to the
-    electron's at the other.
+    surface, tinted from the hole's colour at the core -- where the hole
+    actually sits -- out to the electron's at the rim, where the orbit runs.
 
     Why the old version rendered as nothing: it fed the *world-space* distance
     from the origin straight into a colour ramp. A ramp's Fac is clamped to
@@ -799,14 +860,10 @@ def aura_volume_material(name, near_color, far_color, density, falloff,
     emit = _math(nt, "MULTIPLY", -260, -320, value2=max(strength, 0.0))
     nt.links.new(prof.outputs["Value"], emit.inputs[0])
 
-    # colour gradient along the pair axis (object Z runs -1 .. +1)
-    sep = _node(nt, "ShaderNodeSeparateXYZ", -800, 220)
-    nt.links.new(tex.outputs["Object"], sep.inputs[0])
-    zt = _math(nt, "MULTIPLY_ADD", -620, 220, value2=0.5, value3=0.5,
-               clamp=True)
-    nt.links.new(sep.outputs["Z"], zt.inputs[0])
-    ramp = _two_stop_ramp(nt, -440, 220, near_color, far_color)
-    nt.links.new(zt.outputs["Value"], ramp.inputs["Fac"])
+    # colour gradient outward from the hole, reusing the same normalised
+    # radius that drives the density
+    ramp = _two_stop_ramp(nt, -440, 220, core_color, edge_color)
+    nt.links.new(length.outputs["Value"], ramp.inputs["Fac"])
 
     vol = _node(nt, "ShaderNodeVolumePrincipled", 0, 0)
     _set_in(vol, "Anisotropy", 0.0)
@@ -913,19 +970,140 @@ def build_field_line_objects(col, lines):
     add_object("Exciton_FieldLines", V, F, mat, col, colors=C)
 
 
-def _aura_shape():
-    """Prolate spheroid enclosing both particles."""
-    half = SEPARATION * 0.5
-    long_axis = half + max(ELECTRON_RADIUS, HOLE_RADIUS) + AURA_MARGIN
-    short_axis = max(ELECTRON_RADIUS, HOLE_RADIUS) + AURA_MARGIN
-    return long_axis, short_axis
-
-
-def build_aura(col, centre, axis):
+def aura_axes():
     """
-    The aura is a single emissive volume: density AURA_DENSITY at the centre
-    of the pair, falling smoothly to nothing at the surface of a prolate
-    spheroid that encloses both particles.
+    (across, along) radii of the aura: an oblate blob centred on the hole,
+    wide enough in the orbit plane to take the whole path in and squashed
+    along the orbit normal, so it hugs the orbit instead of ballooning round
+    it. Also the reference size for the rings and the camera framing.
+    """
+    across = ORBIT_RADIUS + ELECTRON_RADIUS + AURA_MARGIN
+    along = max(across * AURA_FLATTEN, HOLE_RADIUS * 1.6)
+    return across, along
+
+
+def orbit_frame(normal):
+    """
+    (e1, e2) spanning the orbit plane, with e1 to the right of frame and e2
+    toward the camera. Tying the frame to the view is what makes ORBIT_PHASE
+    mean the same thing whatever ORBIT_NORMAL is set to.
+    """
+    side, right = camera_basis(normal)
+    return right, side
+
+
+def orbit_position(centre, normal, degrees):
+    e1, e2 = orbit_frame(normal)
+    th = math.radians(degrees)
+    return centre + (e1 * cos(th) + e2 * sin(th)) * ORBIT_RADIUS
+
+
+def orbit_points(centre, normal, n):
+    """
+    The whole loop, starting at the electron and running backwards along its
+    direction of travel. Point i is therefore i/n of the way *behind* the
+    electron, which is exactly the parameter the trail needs.
+    """
+    e1, e2 = orbit_frame(normal)
+    phase = math.radians(ORBIT_PHASE)
+    sweep = -2.0 * pi * (1.0 if ORBIT_DIRECTION >= 0 else -1.0)
+    pts = []
+    for i in range(n + 1):
+        th = phase + sweep * i / n
+        pts.append(centre + (e1 * cos(th) + e2 * sin(th)) * ORBIT_RADIUS)
+    return pts
+
+
+def build_orbit_path(col, centre, normal):
+    """
+    The electron's path, as a single tube that is thick and hot where the
+    electron is and thins and cools going backwards round the loop -- a comet
+    trail, with the rest of the circle left as a faint guide so the orbit
+    still reads as closed.
+    """
+    n = max(int(ORBIT_RESOLUTION), 24)
+    pts = orbit_points(centre, normal, n)
+    hot = tuple(v * ORBIT_TRAIL_LEVEL for v in hex_to_linear(ELECTRON_RIM))
+    faint = tuple(v * ORBIT_PATH_LEVEL for v in hex_to_linear(ORBIT_PATH_COLOR))
+    trail = min(max(ORBIT_TRAIL_LENGTH, 1e-3), 1.0)
+    falloff = max(ORBIT_TRAIL_FALLOFF, 0.01)
+
+    radii, colors = [], []
+    for i in range(n + 1):
+        behind = i / n                     # 0 at the electron, 1 back to it
+        w = max(0.0, 1.0 - behind / trail) ** falloff
+        radii.append(ORBIT_TUBE_RADIUS *
+                     (ORBIT_PATH_WIDTH + (1.0 - ORBIT_PATH_WIDTH) * w))
+        colors.append(mix(faint, hot, w))
+
+    # With the faint arc turned off its colour is black, and black emission is
+    # still opaque geometry -- a dark hairline across the background rather
+    # than nothing at all. Cut the loop short instead and taper the tail out.
+    taper = 0.0
+    if ORBIT_PATH_LEVEL <= 0.01:
+        keep = min(len(pts), int(trail * n) + 2)
+        pts, radii, colors = pts[:keep], radii[:keep], colors[:keep]
+        taper = 0.06
+
+    v, f, _ = tube_from_polyline(pts, radii, ORBIT_SEGMENTS, taper=taper)
+    if not v:
+        return
+    C = []
+    for c in colors:
+        C.extend([c] * ORBIT_SEGMENTS)
+    mat = vertex_color_emission_material("OrbitPath", "OrbitColor",
+                                         ORBIT_EMISSION)
+    add_object("Exciton_OrbitPath", v, f, mat, col, colors=C,
+               attr_name="OrbitColor")
+
+
+def build_connection(col, r_electron, r_hole):
+    """
+    The light bridging the pair: a spindle of a cord running from the hole to
+    the electron, brightest in the middle and tapering into both spheres. It
+    stands in for the bundle of field lines, so the two still read as bound
+    when SHOW_FIELD_LINES is off.
+    """
+    d = r_electron - r_hole
+    if d.length < 1e-6:
+        return
+    u = d.normalized()
+    a = r_hole + u * (HOLE_RADIUS * 0.85)
+    b = r_electron - u * (ELECTRON_RADIUS * 0.85)
+    if (b - a).length < 1e-6:
+        return
+
+    n = max(int(CONNECTION_RESOLUTION), 8)
+    pts = [a + (b - a) * (i / n) for i in range(n + 1)]
+    e_col = hex_to_linear(ELECTRON_RIM)
+    h_col = hex_to_linear(HOLE_RIM)
+    bulge = min(max(CONNECTION_BULGE, 0.0), 1.0)
+
+    radii, colors = [], []
+    for i in range(n + 1):
+        t = i / n
+        radii.append(CONNECTION_RADIUS * (1.0 - bulge + bulge * sin(pi * t)))
+        g = math.exp(-((t - 0.5) / 0.34) ** 2)
+        boost = 1.0 + (CONNECTION_GLOW - 1.0) * g
+        colors.append(tuple(min(v * boost, 8.0) for v in mix(h_col, e_col, t)))
+
+    v, f, _ = tube_from_polyline(pts, radii, CONNECTION_SEGMENTS, taper=0.10)
+    if not v:
+        return
+    C = []
+    for c in colors:
+        C.extend([c] * CONNECTION_SEGMENTS)
+    mat = vertex_color_emission_material("Connection", "BondColor",
+                                         CONNECTION_EMISSION)
+    add_object("Exciton_Connection", v, f, mat, col, colors=C,
+               attr_name="BondColor")
+
+
+def build_aura(col, centre, normal):
+    """
+    The aura is a single emissive volume: density AURA_DENSITY at the hole,
+    falling smoothly to nothing at the surface of an oblate blob that takes
+    in the whole orbit.
 
     The mesh is a unit sphere and the shape lives entirely in the object's
     scale and rotation. That is not cosmetic -- it is what makes the volume
@@ -935,7 +1113,7 @@ def build_aura(col, centre, axis):
     """
     e_col = hex_to_linear(ELECTRON_RIM)
     h_col = hex_to_linear(HOLE_RIM)
-    long_axis, short_axis = _aura_shape()
+    across, along = aura_axes()
     segs, rings = AURA_RESOLUTION
 
     mat = aura_volume_material("Aura_Volume", h_col, e_col, AURA_DENSITY,
@@ -946,8 +1124,8 @@ def build_aura(col, centre, axis):
         return
     obj.location = centre
     obj.rotation_mode = "QUATERNION"
-    obj.rotation_quaternion = Vector((0.0, 0.0, 1.0)).rotation_difference(axis)
-    obj.scale = (short_axis, short_axis, long_axis)
+    obj.rotation_quaternion = Vector((0.0, 0.0, 1.0)).rotation_difference(normal)
+    obj.scale = (across, across, along)
     _enable_volumes()
 
 
@@ -969,26 +1147,26 @@ def camera_basis(axis):
     return side, right
 
 
-def _ring_points(k, long_axis, short_axis, centre, axis):
+def _ring_points(k, along_axis, across_axis, centre, axis):
     """
     World-space points of ring k.
 
-    "orbit": an ellipse in a plane that contains the pair axis -- semi-axis
-    `short` across the pair and `long` along it -- so the ring wraps the whole
-    exciton lengthways, as the loops do in the reference figure. RING_TILT
+    "orbit": an ellipse in a plane that contains the orbit normal -- semi-axis
+    `across` in the orbit plane and `along` up the normal -- so the ring wraps
+    the whole exciton, as the loops do in the reference figure. RING_TILT
     rotates that plane about the pair axis away from face-on: at 0 the ring is
     a flat ellipse in the image plane with no depth to it, and at 90 it is
     edge-on. Around 30 the near arc crosses in front of the particles and the
     far arc behind them, which is what reads as a ring in three dimensions.
 
-    "equator": a circle perpendicular to the pair axis, sitting on the aura's
+    "equator": a circle parallel to the orbit plane, sitting on the aura's
     surface at its own height like a line of latitude. RING_TILT tips it
     toward the viewer.
     """
     n = max(int(RING_RESOLUTION), 12)
     count = max(int(RING_COUNT), 1)
-    L = long_axis * RING_SCALE
-    S = short_axis * RING_SCALE
+    L = along_axis * RING_SCALE
+    S = across_axis * RING_SCALE
     side, right = camera_basis(axis)
     pts = []
 
@@ -1018,15 +1196,15 @@ def _ring_points(k, long_axis, short_axis, centre, axis):
 
 def build_rings(col, centre, axis):
     """Rings encircling the exciton, as tubes swept around each ring path."""
-    long_axis, short_axis = _aura_shape()
+    across, along = aura_axes()
     e_col = hex_to_linear(ELECTRON_RIM)
     h_col = hex_to_linear(HOLE_RIM)
     flat = hex_to_linear(RING_COLOR) if RING_COLOR else None
-    span = long_axis * RING_SCALE
+    inner, outer = min(along, across) * RING_SCALE, max(along, across) * RING_SCALE
 
     V, F, C = [], [], []
     for k in range(max(int(RING_COUNT), 1)):
-        pts = _ring_points(k, long_axis, short_axis, centre, axis)
+        pts = _ring_points(k, along, across, centre, axis)
         v, f, _ = tube_from_polyline(pts, RING_TUBE_RADIUS, RING_SEGMENTS)
         if not v:
             continue
@@ -1034,10 +1212,11 @@ def build_rings(col, centre, axis):
         V.extend(v)
         F.extend(tuple(base + i for i in face) for face in f)
         if flat is None:
-            # colour every ring vertex by where it sits along the pair axis:
-            # the hole's colour at one end, the electron's at the other
+            # colour every ring vertex by how far out it is: the hole's colour
+            # nearest the centre, the electron's out where the orbit runs
+            width = max(outer - inner, 1e-6)
             for p in pts:
-                t = min(max(0.5 + 0.5 * (p - centre).dot(axis) / span, 0.0), 1.0)
+                t = min(max(((p - centre).length - inner) / width, 0.0), 1.0)
                 C.extend([mix(h_col, e_col, t)] * RING_SEGMENTS)
 
     if not V:
@@ -1156,14 +1335,14 @@ def setup_world(scene):
 
 def setup_camera(scene, centre, axis):
     """
-    Look at the pair from side-on, raised CAMERA_ELEVATION degrees above the
-    plane through it. The elevation is what opens the rings out: from dead
-    level, a ring whose plane is perpendicular to the view is seen edge-on and
-    renders as a straight line.
+    Look at the exciton from side-on, raised CAMERA_ELEVATION degrees above
+    the orbit plane. The elevation is what opens the orbit out into an
+    ellipse: from dead level the electron's path is seen edge-on and renders
+    as a straight line.
     """
-    long_axis, _ = _aura_shape()
+    across, along = aura_axes()
     side, _ = camera_basis(axis)
-    dist = long_axis * 3.2
+    dist = max(across, along) * 3.2
     elev = math.radians(CAMERA_ELEVATION)
     loc = centre + side * (dist * cos(elev)) + axis * (dist * sin(elev))
 
@@ -1323,17 +1502,17 @@ def main():
     if CLEAR_SCENE:
         clear_scene()
 
-    axis = Vector(AXIS_DIRECTION)
-    if axis.length < 1e-9:
-        raise ValueError("AXIS_DIRECTION must be a non-zero vector")
-    axis = axis.normalized()
+    normal = Vector(ORBIT_NORMAL)
+    if normal.length < 1e-9:
+        raise ValueError("ORBIT_NORMAL must be a non-zero vector")
+    normal = normal.normalized()
     centre = Vector(CENTER)
-    r_electron = centre + axis * (SEPARATION * 0.5)
-    r_hole = centre - axis * (SEPARATION * 0.5)
+    r_hole = centre                                   # the hole is orbited
+    r_electron = orbit_position(centre, normal, ORBIT_PHASE)
 
-    if SEPARATION <= ELECTRON_RADIUS + HOLE_RADIUS:
-        print("[exciton] WARNING: SEPARATION is smaller than the two radii "
-              "combined -- the particles overlap.")
+    if ORBIT_RADIUS <= ELECTRON_RADIUS + HOLE_RADIUS:
+        print("[exciton] WARNING: ORBIT_RADIUS is smaller than the two radii "
+              "combined -- the electron overlaps the hole.")
 
     col = get_collection("Exciton")
 
@@ -1345,21 +1524,31 @@ def main():
         if lines:
             build_field_line_objects(col, lines)
 
+    if SHOW_ORBIT_PATH:
+        build_orbit_path(col, centre, normal)
+        print(f"[exciton] orbit radius {ORBIT_RADIUS:.2f}, electron at "
+              f"{ORBIT_PHASE:.0f} deg, travelling "
+              f"{'+' if ORBIT_DIRECTION >= 0 else '-'}ve, trail over "
+              f"{ORBIT_TRAIL_LENGTH * 100:.0f}% of the loop")
+
+    if SHOW_CONNECTION:
+        build_connection(col, r_electron, r_hole)
+
     build_particles(col, r_electron, r_hole)
 
     if SHOW_PARTICLE_GLOW:
         build_particle_glow(col, r_electron, r_hole)
 
     if SHOW_AURA:
-        build_aura(col, centre, axis)
+        build_aura(col, centre, normal)
 
     if SHOW_RINGS:
-        build_rings(col, centre, axis)
+        build_rings(col, centre, normal)
         print(f"[exciton] {RING_COUNT} ring(s), mode {RING_MODE!r}")
 
     engine = None
     if SETUP_SCENE:
-        engine = setup_scene(centre, axis)
+        engine = setup_scene(centre, normal)
 
     print("[exciton] Done. Electron at "
           f"({r_electron.x:.2f}, {r_electron.y:.2f}, {r_electron.z:.2f}), "
