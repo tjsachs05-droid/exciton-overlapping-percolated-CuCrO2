@@ -6,7 +6,7 @@ transparent backgrounds in PowerPoint.
 
 | script | draws |
 | --- | --- |
-| `cucro2perc.py` | the CuCrO2 delafossite lattice with the A-site sublattice coloured to show 2D site percolation (p_c = 1/2) |
+| `cucro2perc.py` | a CrO2 \| Cu/Pd \| CrO2 sandwich whose A-site composition ramps across the sheet, from insulating through the percolation threshold (p_c = 1/2) to fully metallic |
 | `exciton.py` | a small electron orbiting a larger hole, with a Saturn-ring motion tail behind it and a volumetric aura between the two |
 
 Both take their palette from `Reference 1` in this repo: a deep blue field, a
@@ -83,8 +83,26 @@ file as soon as it finishes building.
 
 `cucro2perc.py`
 
-* `METAL_FRACTION` / `COMPOSITION_SERIES` — one panel, or several side by
-  side across the percolation threshold.
+* `COMPOSITION_GRADIENT` (on by default) ramps the metallic fraction across
+  the sheet: `GRADIENT_MIN` on the left, `GRADIENT_MID` through the middle,
+  `GRADIENT_MAX` on the right, with `GRADIENT_*_BAND` setting how much of the
+  width each one holds flat. One picture then shows the insulator, the
+  threshold and the metal. The console reports what each slice actually came
+  out as, and whether the largest cluster spans along the gradient or only
+  across it.
+* `METAL_FRACTION` / `COMPOSITION_SERIES` — with the gradient off, one panel
+  at a fixed composition, or several side by side.
+* `N_CELLS` — a gradient needs a wide sheet to read; below about 200 A sites
+  the slice statistics are noise rather than a ramp.
+* `CRO2_CAPS` / `N_A_PLANES` — the three-layer sandwich keeps one A-plane with
+  a complete CrO2 slab above and below. The cuts run just inside the
+  neighbouring A-planes, not midway to them: an O-Cr-O slab sits centred
+  between two A-planes, so a midpoint cut would slice it in half.
+* `ORTHOGRAPHIC`, `CAMERA_ELEVATION`, `CAMERA_AZIMUTH`, `CAMERA_LENS` — the
+  camera is a perspective one by default, looking down at the sheet from
+  `CAMERA_ELEVATION` degrees above its plane, which is what makes the
+  sandwich read as a solid. The azimuth decides which way the gradient runs
+  across the frame; -90 lays it left to right.
 * `COLOR_MODE` — `"species"`, `"spanning"` or `"clusters"`.
 * `LAYER_GAP` — extra vertical distance between the Cu planes and the CrO2
   slabs. Bonds, neighbours and the percolation analysis are all computed on
@@ -93,8 +111,7 @@ file as soon as it finishes building.
 * `SHOW_VERTICAL_BONDS` / `VERTICAL_BOND_ANGLE` — drop the bonds that run
   between layers. On CuCrO2 this removes the Cu-O struts and leaves the CrO6
   octahedra intact, since only the Cu-O bonds lie along the stacking axis.
-* `ORTHOGRAPHIC`, `CAMERA_MARGIN`, `ADD_LIGHTS` — framing and shading.
+* `CAMERA_MARGIN`, `ADD_LIGHTS` — framing and shading.
 
-`LAYER_GAP` shows best with `SHOW_BONDS = True` and `N_A_PLANES` above 1;
-with the defaults (`SHOW_BONDS = False`, one A-plane kept) there is a single
-gap in the model and no bonds drawn across it.
+`LAYER_GAP` shows best with `SHOW_BONDS = True`: it pulls the three layers
+apart and stretches the vertical Cu-O struts between them.
