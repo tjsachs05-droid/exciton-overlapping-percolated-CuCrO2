@@ -221,6 +221,10 @@ GLOW_ALPHA_GAIN        = 1.6    # how strongly the bloom opens up the alpha
 RENDER_ENGINE          = "EEVEE"   # "EEVEE" or "CYCLES". Both render the
                                    # volumetric aura; Cycles is cleaner and
                                    # slower.
+CAMERA_LENS            = 50.0   # focal length in mm
+CAMERA_MARGIN          = 1.18   # >1 leaves air around the exciton. The camera
+                                # fits the geometry exactly, so this is pure
+                                # breathing room.
 RESOLUTION             = (2200, 2200)
 RENDER_SAMPLES         = 128
 VIEW_TRANSFORM         = "Standard"   # "Standard" keeps the colours exactly
@@ -1215,25 +1219,107 @@ def setup_world(scene):
         bg.inputs["Strength"].default_value = 0.0
 
 
-def setup_camera(scene, centre, axis):
+def drawn_points():
+    """
+    Every vertex of every mesh built so far, in world space.
+
+    The camera frames these rather than an estimated radius. An estimate has
+    to guess how far the drawn geometry actually reaches -- the width of the
+    tail band, the aura's spindle, the halo spheres -- and anything it misses
+    is something the frame clips off. The vertices cannot be wrong about it.
+
+    Meshes here are built in world coordinates, but the aura and the haloes
+    carry their size in the object transform, so those are expanded by hand.
+    """
+    pts = []
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or obj.data is None:
+            continue
+        loc = Vector(getattr(obj, "location", (0.0, 0.0, 0.0)))
+        sx, sy, sz = tuple(getattr(obj, "scale", (1.0, 1.0, 1.0)))
+        scaled = abs(sx - 1.0) + abs(sy - 1.0) + abs(sz - 1.0) > 1e-9
+        radius = max(abs(sx), abs(sy), abs(sz))
+        for v in obj.data.vertices:
+            co = getattr(v, "co", v)
+            if scaled:
+                # a rotated, non-uniformly scaled object: its own rotation is
+                # unknown here, so take the enclosing sphere of the scale
+                pts.append((loc.x + co[0] * radius, loc.y + co[1] * radius,
+                            loc.z + co[2] * radius))
+            else:
+                pts.append((loc.x + co[0], loc.y + co[1], loc.z + co[2]))
+    return pts
+
+
+def setup_camera(scene, centre, axis, points=None):
     """
     Look at the exciton from side-on, raised CAMERA_ELEVATION degrees above
     the orbit plane. The elevation is what opens the orbit out into an
     ellipse: from dead level the electron's path is seen edge-on and renders
     as a straight line.
+
+    The distance is fitted rather than guessed: every point is projected onto
+    the camera's right and up axes, and since those components do not change
+    as the camera slides along its view direction, each point sets a lower
+    bound on the distance and the largest of them frames the lot.
     """
     side, _ = camera_basis(axis)
-    dist = scene_extent() * 3.6
     elev = math.radians(CAMERA_ELEVATION)
-    loc = centre + side * (dist * cos(elev)) + axis * (dist * sin(elev))
+    eye = (side * cos(elev) + axis * sin(elev)).normalized()
+    forward = -eye
+    right = forward.cross(Vector((0.0, 0.0, 1.0)))
+    right = right.normalized() if right.length > 1e-6 else Vector((1.0, 0.0, 0.0))
+    up = right.cross(forward).normalized()
+
+    if not points:
+        r = scene_extent()
+        points = [(centre.x + x * r, centre.y + y * r, centre.z + z * r)
+                  for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    zs = [p[2] for p in points]
+    target = Vector((0.5 * (min(xs) + max(xs)), 0.5 * (min(ys) + max(ys)),
+                     0.5 * (min(zs) + max(zs))))
+
+    res_x, res_y = RESOLUTION
+    aspect = res_x / float(res_y)
+    tan_h = 18.0 / max(CAMERA_LENS, 1e-3)          # 36 mm sensor, half-angle
+    tan_v = tan_h / aspect
+
+    dist = 0.0
+    reach = 0.0
+    for p in points:
+        d = Vector(p) - target
+        ahead = d.dot(forward)
+        dist = max(dist,
+                   abs(d.dot(right)) * CAMERA_MARGIN / tan_h - ahead,
+                   abs(d.dot(up)) * CAMERA_MARGIN / tan_v - ahead)
+        reach = max(reach, d.length)
+    dist = max(dist, 1.0)
 
     cam_data = bpy.data.cameras.new("ExcitonCamera")
+    cam_data.lens = CAMERA_LENS
+    try:
+        cam_data.sensor_fit = "HORIZONTAL"         # makes the maths definite
+    except Exception:
+        pass
+    cam_data.clip_start = max(0.01, (dist - reach) * 0.5)
+    cam_data.clip_end = dist + reach * 4.0 + 100.0
+
     cam = bpy.data.objects.new("ExcitonCamera", cam_data)
     scene.collection.objects.link(cam)
-    cam.location = loc
-    direction = (centre - loc).normalized()
-    cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+    cam.location = target + eye * dist
+    cam.rotation_euler = forward.to_track_quat("-Z", "Y").to_euler()
     scene.camera = cam
+
+    fw = max(abs((Vector(p) - target).dot(right)) /
+             max((Vector(p) - target).dot(forward) + dist, 1e-9)
+             for p in points) / tan_h
+    fh = max(abs((Vector(p) - target).dot(up)) /
+             max((Vector(p) - target).dot(forward) + dist, 1e-9)
+             for p in points) / tan_v
+    print(f"[exciton] framing: fills {fw * 100:.0f}% of the frame across and "
+          f"{fh * 100:.0f}% up, from {len(points)} vertices")
     return cam
     return cam
 
@@ -1390,14 +1476,17 @@ def setup_scene(centre, axis):
     scene = bpy.context.scene
     engine = setup_render(scene)
     setup_world(scene)
-    cam = setup_camera(scene, centre, axis)
+    points = drawn_points()
+    cam = setup_camera(scene, centre, axis, points)
 
     if BACKGROUND_MODE in ("gradient", "flat"):
         bottom = hex_to_linear(BACKGROUND_COLOR)
         top = (hex_to_linear(BACKGROUND_TOP_COLOR)
                if BACKGROUND_MODE == "gradient" else bottom)
-        add_background_plane(scene, cam, centre, axis, bottom, top,
-                             scene_extent())
+        reach = max((Vector(p) - centre).length for p in points) if points \
+            else scene_extent()
+        add_background_plane(scene, cam, centre, Vector((0.0, 0.0, 1.0)),
+                             bottom, top, reach)
 
     if ADD_GLOW_COMPOSITOR:
         try:

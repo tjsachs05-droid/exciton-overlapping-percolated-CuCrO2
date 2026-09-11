@@ -260,7 +260,10 @@ CAMERA_AZIMUTH         = -90.0  # degrees around the sheet, measured from +x.
                                 # -90 puts the camera on the -y side, which
                                 # lays the GRADIENT_AXIS left-to-right across
                                 # the frame.
-CAMERA_MARGIN          = 1.06   # >1 leaves a little air around the structure
+CAMERA_MARGIN          = 1.18   # >1 leaves air around the structure. The
+                                # camera fits the geometry exactly, so this is
+                                # pure breathing room -- at 1.0 the outermost
+                                # atoms sit right on the frame edge.
 AMBIENT_STRENGTH       = 0.35   # world light. It only lights the atoms; the
                                 # world itself stays invisible on a
                                 # transparent film.
@@ -1730,23 +1733,47 @@ def setup_lights(scene):
     _add_sun(scene, "Rim", (0.1, 0.9, -0.25), KEY_LIGHT_ENERGY * 0.45)
 
 
-def setup_camera(scene, bounds):
+def drawn_points():
+    """
+    Every vertex of every mesh built so far, in world space.
+
+    The camera frames these rather than a bounding box worked out from atom
+    positions and a radius. An estimate has to guess what the drawn geometry
+    actually reaches -- sphere tessellation, bond caps, the widest display
+    radius -- and anything it misses is something the frame clips off. The
+    vertices cannot be wrong about it.
+
+    Every mesh here is built in world coordinates with its object left at the
+    origin, so the vertices can be read as they are.
+    """
+    pts = []
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or obj.data is None:
+            continue
+        for v in obj.data.vertices:
+            co = getattr(v, "co", v)
+            pts.append((co[0], co[1], co[2]))
+    return pts
+
+
+def setup_camera(scene, points):
     """
     Frame the structure from CAMERA_ELEVATION degrees above its plane, at
     CAMERA_AZIMUTH around it. build_supercell has already rotated the crystal
     so that VIEW_DIRECTION points along +Z, which is the axis the elevation is
     measured from.
 
-    The framing is exact rather than a guess. Project the eight corners of the
-    bounding box onto the camera's own right and up axes; those two components
-    do not change as the camera slides along its view direction, so each
-    corner sets a lower bound on the distance and the largest of them frames
-    the lot.
+    The framing is exact rather than a guess. Project every point onto the
+    camera's own right and up axes; those two components do not change as the
+    camera slides along its view direction, so each point sets a lower bound
+    on the distance and the largest of them frames the lot.
     """
-    x0, x1, y0, y1, z0, z1 = bounds
-    target = Vector((0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (z0 + z1)))
-    corners = [Vector((x, y, z)) for x in (x0, x1)
-               for y in (y0, y1) for z in (z0, z1)]
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    zs = [p[2] for p in points]
+    target = Vector((0.5 * (min(xs) + max(xs)), 0.5 * (min(ys) + max(ys)),
+                     0.5 * (min(zs) + max(zs))))
+    corners = [Vector(p) for p in points]
 
     elev = radians(min(max(CAMERA_ELEVATION, -89.0), 89.0))
     azim = radians(CAMERA_AZIMUTH)
@@ -1799,6 +1826,23 @@ def setup_camera(scene, bounds):
     cam.location = target + eye * dist
     cam.rotation_euler = forward.to_track_quat("-Z", "Y").to_euler()
     scene.camera = cam
+
+    # how much of the frame the structure actually uses. A wide flat sheet
+    # seen from a low elevation is much wider than it is tall, so it fills the
+    # frame across and leaves air above and below -- raise CAMERA_ELEVATION or
+    # widen RESOLUTION if that bothers you.
+    if ORTHOGRAPHIC:
+        fw = 2 * max(abs((c - target).dot(right)) for c in corners) / span
+        fh = 2 * max(abs((c - target).dot(up)) for c in corners) / (span / aspect
+                                                                   if aspect >= 1.0
+                                                                   else span)
+    else:
+        fw = max(abs((c - target).dot(right)) /
+                 max((c - target).dot(forward) + dist, 1e-9) for c in corners) / tan_h
+        fh = max(abs((c - target).dot(up)) /
+                 max((c - target).dot(forward) + dist, 1e-9) for c in corners) / tan_v
+    print(f"  framing: the structure fills {fw * 100:.0f}% of the frame across "
+          f"and {fh * 100:.0f}% of it up, from {len(points)} vertices")
     return cam
 
 
@@ -1811,13 +1855,21 @@ def setup_scene(bounds):
     setup_world(scene)
     if ADD_LIGHTS:
         setup_lights(scene)
-    cam = setup_camera(scene, bounds)
+    # frame what was actually drawn; the estimated bounds are only a fallback
+    # for the case where nothing was built at all
+    points = drawn_points()
+    if not points:
+        x0, x1, y0, y1, z0, z1 = bounds
+        points = [(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
+    cam = setup_camera(scene, points)
 
     if BACKGROUND_MODE in ("gradient", "flat"):
-        x0, x1, y0, y1, z0, z1 = bounds
-        target = Vector((0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (z0 + z1)))
-        reach = max((Vector((x, y, z)) - target).length
-                    for x in (x0, x1) for y in (y0, y1) for z in (z0, z1))
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        zs = [p[2] for p in points]
+        target = Vector((0.5 * (min(xs) + max(xs)), 0.5 * (min(ys) + max(ys)),
+                         0.5 * (min(zs) + max(zs))))
+        reach = max((Vector(p) - target).length for p in points)
         bottom = hex_to_linear(BACKGROUND_COLOR)
         top = (hex_to_linear(BACKGROUND_TOP_COLOR)
                if BACKGROUND_MODE == "gradient" else bottom)
