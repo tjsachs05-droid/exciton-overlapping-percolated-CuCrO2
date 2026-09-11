@@ -6,7 +6,7 @@ transparent backgrounds in PowerPoint.
 
 | script | draws |
 | --- | --- |
-| `cucro2perc.py` | a CrO2 \| Cu/Pd \| CrO2 sandwich whose A-site composition ramps across the sheet, from insulating through the percolation threshold (p_c = 1/2) to fully metallic |
+| `cucro2perc.py` | a Cu/Pd plane under a CrO2 slab, with large metallic islands scattered over an otherwise gold host sheet (or a composition gradient, or a uniform alloy) |
 | `exciton.py` | a small electron orbiting a larger hole, with a Saturn-ring motion tail behind it and a volumetric aura between the two |
 
 Both take their palette from `Reference 1` in this repo: a deep blue field, a
@@ -44,10 +44,17 @@ back black. `exciton.py` also folds its bloom into the alpha channel
 without that step every pixel of glow outside the geometry keeps alpha 0 and
 disappears the moment the image is composited.
 
-The gradient is painted into a small image and composited behind the render
-rather than being a world shader, which is the only approach that survives an
-orthographic camera — under one, every view ray points the same way and a
-world-space gradient has nothing left to vary over.
+The backdrop is an emissive quad placed behind the scene with the gradient
+baked into its vertex colours — not a world shader and not a composited
+image. A world-space gradient has nothing to vary over under an orthographic
+camera, and a generated image is worse: `bpy.data.images.new()` makes an
+image whose source is GENERATED, and Blender rebuilds a generated image's
+buffer from its own settings whenever it re-evaluates it, so a gradient poked
+in from Python is simply not there at render time and the background comes
+out transparent. Geometry and vertex colours have nothing to regenerate.
+
+The film stays transparent in every mode; the backdrop is what makes the
+render opaque where it is present.
 
 Set `OUTPUT_PATH` and `RENDER_NOW = True` in either script to render to a
 file as soon as it finishes building.
@@ -83,21 +90,27 @@ file as soon as it finishes building.
 
 `cucro2perc.py`
 
-* `COMPOSITION_GRADIENT` (on by default) ramps the metallic fraction across
-  the sheet: `GRADIENT_MIN` on the left, `GRADIENT_MID` through the middle,
-  `GRADIENT_MAX` on the right, with `GRADIENT_*_BAND` setting how much of the
-  width each one holds flat. One picture then shows the insulator, the
-  threshold and the metal. The console reports what each slice actually came
-  out as, and whether the largest cluster spans along the gradient or only
-  across it.
-* `METAL_FRACTION` / `COMPOSITION_SERIES` — with the gradient off, one panel
-  at a fixed composition, or several side by side.
-* `N_CELLS` — a gradient needs a wide sheet to read; below about 200 A sites
-  the slice statistics are noise rather than a ramp.
-* `CRO2_CAPS` / `N_A_PLANES` — the three-layer sandwich keeps one A-plane with
-  a complete CrO2 slab above and below. The cuts run just inside the
-  neighbouring A-planes, not midway to them: an O-Cr-O slab sits centred
-  between two A-planes, so a midpoint cut would slice it in half.
+* `COMPOSITION_MODE` picks how the substitution is laid out:
+  * `"islands"` (default) — a mostly-host sheet with `ISLAND_COUNT` large
+    metallic islands on it. `ISLAND_RADIUS` sizes them as a fraction of the
+    sheet's shorter side; `ISLAND_WOBBLE` and `ISLAND_EDGE` keep the outlines
+    irregular and the coastlines ragged rather than drawn-on;
+    `ISLAND_BACKGROUND` sprinkles a few stray metallic sites over the host.
+    Three islands at the defaults cover about a third of the sheet, so gold
+    stays the clear majority. The console reports each island's size and
+    whether its metallic sites join into a single cluster.
+  * `"gradient"` — x ramps across the sheet, `GRADIENT_MIN` on one side,
+    `GRADIENT_MID` through the middle, `GRADIENT_MAX` on the other, with
+    `GRADIENT_*_BAND` setting how much of the width each holds flat.
+  * `"uniform"` — one composition everywhere, from `METAL_FRACTION` or
+    `COMPOSITION_SERIES` for several panels side by side.
+* `N_CELLS` — the islands and the gradient both need a wide sheet to read;
+  below about 200 A sites the statistics are noise rather than structure.
+* `CRO2_SLABS` / `N_A_PLANES` — how many complete CrO2 slabs sit around the
+  A-plane: 0 for the bare plane, 1 (the default) for one above it, 2 for a
+  CrO2 | Cu/Pd | CrO2 sandwich. The cuts run just inside the neighbouring
+  A-planes, not midway to them: an O-Cr-O slab sits centred between two
+  A-planes, so a midpoint cut would slice it in half.
 * `ORTHOGRAPHIC`, `CAMERA_ELEVATION`, `CAMERA_AZIMUTH`, `CAMERA_LENS` — the
   camera is a perspective one by default, looking down at the sheet from
   `CAMERA_ELEVATION` degrees above its plane, which is what makes the
@@ -113,5 +126,7 @@ file as soon as it finishes building.
   octahedra intact, since only the Cu-O bonds lie along the stacking axis.
 * `CAMERA_MARGIN`, `ADD_LIGHTS` — framing and shading.
 
-`LAYER_GAP` shows best with `SHOW_BONDS = True`: it pulls the three layers
-apart and stretches the vertical Cu-O struts between them.
+`LAYER_GAP` defaults to 7 A, which lifts the CrO2 slab clear of the Cu/Pd
+plane so the two read separately. With `SHOW_VERTICAL_BONDS = False` the
+vertical Cu-O struts between them are dropped, leaving the CrO6 octahedral
+network in the slab and the metallic channel network in the plane.

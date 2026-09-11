@@ -204,6 +204,9 @@ BACKGROUND_MODE        = "transparent"
                                 # "flat"        -> a single BACKGROUND_COLOR
 BACKGROUND_COLOR       = "#0A2A5E"  # deep blue, sampled from Reference 1
 BACKGROUND_TOP_COLOR   = "#12539E"  # brighter blue at the top of the gradient
+BACKGROUND_MARGIN      = 1.15   # how far the backdrop oversizes the frame
+BACKGROUND_STEPS       = 48     # rows the gradient is built from
+BACKGROUND_SMOOTH      = True   # ease the gradient instead of ramping it
 CAMERA_ELEVATION       = 20.0   # degrees above the orbit plane. A camera
                                 # level with that plane sees the tail exactly
                                 # edge-on, as a straight line; this is what
@@ -1159,9 +1162,10 @@ def setup_render(scene):
     r = scene.render
     r.resolution_x, r.resolution_y = RESOLUTION
     r.resolution_percentage = 100
-    # "gradient" renders on a transparent film too and puts the blue back in
-    # the compositor, which is what lets the gradient be exact in screen space
-    r.film_transparent = BACKGROUND_MODE in ("transparent", "gradient")
+    # The backdrop is an object in the scene, so the film can stay
+    # transparent in every mode: where there is no backdrop the render simply
+    # comes out with an alpha channel.
+    r.film_transparent = True
 
     # PNG + RGBA: without the RGBA colour mode the alpha channel is thrown
     # away on save and the background comes out black
@@ -1205,15 +1209,10 @@ def setup_world(scene):
     world.use_nodes = True
     bg = world.node_tree.nodes.get("Background")
     if bg:
-        if BACKGROUND_MODE == "flat":
-            bg.inputs["Color"].default_value = (
-                *hex_to_linear(BACKGROUND_COLOR), 1.0)
-            bg.inputs["Strength"].default_value = 1.0
-        else:
-            # the film hides the world anyway; killing its strength keeps it
-            # from tinting the volumetric aura
-            bg.inputs["Color"].default_value = (0.0, 0.0, 0.0, 1.0)
-            bg.inputs["Strength"].default_value = 0.0
+        # the backdrop object carries the background, so the world only ever
+        # has to stay out of the way -- at any strength it would tint the aura
+        bg.inputs["Color"].default_value = (0.0, 0.0, 0.0, 1.0)
+        bg.inputs["Strength"].default_value = 0.0
 
 
 def setup_camera(scene, centre, axis):
@@ -1236,37 +1235,84 @@ def setup_camera(scene, centre, axis):
     cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
     scene.camera = cam
     return cam
+    return cam
 
 
-def background_gradient_image(name, bottom, top, height=512):
+def _ease_clamped(u):
+    u = min(max(u, 0.0), 1.0)
+    return u * u * (3.0 - 2.0 * u)
+
+
+def add_background_plane(scene, cam, target, up_hint, bottom, top, reach):
     """
-    A 4 x `height` float image holding the vertical background gradient.
+    The background is an emissive quad placed behind everything and sized to
+    fill the frame, with the gradient baked into its vertex colours.
 
-    Painting the gradient into an image and compositing it behind the render
-    is the one approach that works for every camera and every engine: a
-    world-space gradient has nothing to vary over under an orthographic
-    camera, and the compositor has no texture-coordinate node of its own.
+    This replaces compositing a generated image behind the render, which is
+    where the background was going missing: bpy.data.images.new() makes an
+    image whose source is GENERATED, and Blender rebuilds a generated image's
+    buffer from its own settings whenever it re-evaluates it. The gradient
+    poked in from Python was therefore not there at render time -- the Image
+    node handed the compositor an empty frame, and the background came out
+    transparent. Geometry and vertex colours have nothing to regenerate, and
+    behave identically in EEVEE and Cycles.
     """
-    img = bpy.data.images.get(name)
-    if img:
-        bpy.data.images.remove(img)
-    img = bpy.data.images.new(name, 4, height, alpha=True, float_buffer=True)
-    flat = []
-    for row in range(height):                    # row 0 is the bottom row
-        r, g, b = mix(bottom, top, row / (height - 1.0))
-        flat.extend((r, g, b, 1.0) * 4)
+    loc = Vector(cam.location)
+    forward = (target - loc)
+    if forward.length < 1e-9:
+        return None
+    forward = forward.normalized()
+    right = forward.cross(up_hint)
+    right = right.normalized() if right.length > 1e-6 else Vector((1.0, 0.0, 0.0))
+    up = right.cross(forward).normalized()
+
+    centre = target + forward * (reach * 2.0 + 1.0)
+    res_x, res_y = RESOLUTION
+    aspect = res_x / float(res_y)
+    tan_h = 18.0 / max(getattr(cam.data, "lens", 50.0), 1e-3)
+    half_w = (centre - loc).length * tan_h * BACKGROUND_MARGIN
+    half_h = half_w / aspect
+
+    rows = max(int(BACKGROUND_STEPS), 2)
+    verts, faces, colors = [], [], []
+    for i in range(rows + 1):
+        t = i / rows
+        c = mix(bottom, top, _ease_clamped(t) if BACKGROUND_SMOOTH else t)
+        y = (2.0 * t - 1.0) * half_h
+        for side in (-1.0, 1.0):
+            p = centre + right * (side * half_w) + up * y
+            verts.append((p.x, p.y, p.z))
+            colors.append(c)
+    for i in range(rows):
+        b = 2 * i
+        faces.append((b, b + 1, b + 3, b + 2))
+
+    mat = vertex_color_emission_material("Background", "BackgroundColor", 1.0)
+    obj = add_object("Exciton_Background", verts, faces, mat,
+                     get_collection("Exciton"), colors=colors,
+                     attr_name="BackgroundColor")
+    if obj is None:
+        return None
+    # a backdrop, not a light: keep it out of everything but the camera ray
+    for attr in ("visible_diffuse", "visible_glossy", "visible_transmission",
+                 "visible_volume_scatter", "visible_shadow"):
+        try:
+            setattr(obj, attr, False)
+        except Exception:
+            pass
+    need = (centre - loc).length + max(half_w, half_h) * 2.0
     try:
-        img.pixels.foreach_set(flat)
+        if cam.data.clip_end < need:
+            cam.data.clip_end = need * 1.2
     except Exception:
-        img.pixels = flat
-    return img
+        pass
+    return obj
 
 
 def setup_compositor(scene):
     """
-    Glare for the bloom; on a transparent film, a second pass that folds the
-    bloom into the alpha channel; and in "gradient" mode a final pass that
-    lays the result over the blue background.
+    Glare for the bloom, and on a transparent film a second pass that folds
+    the bloom into the alpha channel.
 
     Glare only adds colour; it does not touch alpha. On a transparent film
     every pixel of glow outside the geometry therefore keeps alpha = 0 and
@@ -1334,27 +1380,6 @@ def setup_compositor(scene):
         except Exception as e:
             print(f"[exciton] glow-in-alpha skipped: {e}")
 
-    if BACKGROUND_MODE == "gradient":
-        gradient = nt.nodes.new("CompositorNodeImage")
-        gradient.location = (60, -420)
-        gradient.image = background_gradient_image(
-            "ExcitonBackground", hex_to_linear(BACKGROUND_COLOR),
-            hex_to_linear(BACKGROUND_TOP_COLOR))
-        scale = nt.nodes.new("CompositorNodeScale")
-        scale.location = (240, -420)
-        try:
-            scale.space = "RENDER_SIZE"
-            scale.frame_method = "STRETCH"
-        except Exception:
-            pass
-        nt.links.new(gradient.outputs["Image"], scale.inputs["Image"])
-
-        over = nt.nodes.new("CompositorNodeAlphaOver")
-        over.location = (420, -160)
-        nt.links.new(scale.outputs["Image"], over.inputs[1])   # background
-        nt.links.new(image_out, over.inputs[2])                # foreground
-        image_out = over.outputs["Image"]
-
     nt.links.new(image_out, comp.inputs["Image"])
 
 
@@ -1365,8 +1390,16 @@ def setup_scene(centre, axis):
     scene = bpy.context.scene
     engine = setup_render(scene)
     setup_world(scene)
-    setup_camera(scene, centre, axis)
-    if ADD_GLOW_COMPOSITOR or BACKGROUND_MODE == "gradient":
+    cam = setup_camera(scene, centre, axis)
+
+    if BACKGROUND_MODE in ("gradient", "flat"):
+        bottom = hex_to_linear(BACKGROUND_COLOR)
+        top = (hex_to_linear(BACKGROUND_TOP_COLOR)
+               if BACKGROUND_MODE == "gradient" else bottom)
+        add_background_plane(scene, cam, centre, axis, bottom, top,
+                             scene_extent())
+
+    if ADD_GLOW_COMPOSITOR:
         try:
             setup_compositor(scene)
         except Exception as e:

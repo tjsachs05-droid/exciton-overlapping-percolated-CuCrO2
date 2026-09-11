@@ -24,15 +24,17 @@ finds the connected clusters of metallic sites (6 in-plane nearest neighbours
 at distance a), reports whether a cluster spans the sample, and can draw the
 "metallic channel" network as cylinders between adjacent metallic sites.
 
-By default the composition is not uniform: COMPOSITION_GRADIENT ramps x
-across the sheet, from no substitution at one end through 0.5 in the middle
-to complete replacement at the other, so a single picture holds the
-insulator, the threshold and the metal. Set COMPOSITION_GRADIENT = False and
-COMPOSITION_SERIES to a list to go back to several uniform panels side by
-side instead.
+COMPOSITION_MODE decides how the substitution is laid out. By default it is
+"islands": a mostly-host sheet with ISLAND_COUNT large metallic islands
+dropped on it. "gradient" instead ramps x across the sheet, from no
+substitution at one end through p_c = 0.5 in the middle to complete
+replacement at the other, so one picture holds the insulator, the threshold
+and the metal. "uniform" is the old behaviour, one composition everywhere,
+and takes COMPOSITION_SERIES for several panels side by side.
 
-The sheet is the three-layer sandwich CrO2 | Cu/Pd | CrO2: one A-plane with a
-complete CrO2 slab above and below it (N_A_PLANES and CRO2_CAPS).
+The sheet is one A-plane with CRO2_SLABS complete CrO2 slabs around it -- one
+above it by default, pulled LAYER_GAP Angstrom clear so the two layers read
+separately.
 
 Notes
 -----
@@ -56,7 +58,7 @@ import math
 import os
 import random
 import re
-from math import cos, sin, radians, sqrt, floor
+from math import atan2, cos, hypot, pi, radians, sin, sqrt, floor
 from mathutils import Vector
 
 # ============================================================================
@@ -77,15 +79,43 @@ LATTICE_SCALE  = 1.0         # multiplies the CIF lattice parameters
 # --- percolation -------------------------------------------------------------
 A_SITE_ELEMENT   = "Cu"      # element on the A site that gets substituted
 METAL_FRACTION   = 0.50      # x: probability an A site is metallic (Pd-like).
-                             # Used only when COMPOSITION_GRADIENT is off.
+                             # Used only by COMPOSITION_MODE = "uniform".
 RANDOM_SEED      = 1         # change for a different random configuration
 
-# --- composition gradient ----------------------------------------------------
-# Rather than one composition for the whole sheet, x can ramp across it: no
-# substitution at all on one side, half on the middle band -- which is exactly
-# the 2D triangular-lattice threshold p_c = 1/2 -- and complete replacement on
-# the other. One picture then shows the insulator, the threshold and the metal.
-COMPOSITION_GRADIENT  = True
+# --- how the composition is laid out ------------------------------------------
+COMPOSITION_MODE      = "islands"
+                              # "islands"  : a mostly-host sheet with a few
+                              #   large metallic islands in it
+                              # "gradient" : x ramps across the sheet, from no
+                              #   substitution through p_c = 1/2 to complete
+                              #   replacement
+                              # "uniform"  : one composition everywhere, from
+                              #   METAL_FRACTION or COMPOSITION_SERIES
+
+# --- metallic islands ---------------------------------------------------------
+ISLAND_COUNT          = 3     # how many metallic islands to drop on the sheet
+ISLAND_RADIUS         = 0.22  # mean island radius, as a fraction of the
+                              # sheet's shorter side. Three at 0.22 cover
+                              # roughly a third of it, so the host stays the
+                              # clear majority.
+ISLAND_RADIUS_JITTER  = 0.22  # +/- this fraction on each island's radius
+ISLAND_WOBBLE         = 0.35  # how far the outline departs from a circle.
+                              # 0 gives discs, which read as drawn-on rather
+                              # than grown.
+ISLAND_EDGE           = 0.30  # width of the soft rim, as a fraction of the
+                              # radius. The probability falls across it
+                              # instead of switching, which frays the coast
+                              # the way a real substituted alloy does.
+ISLAND_FILL           = 0.97  # probability a site well inside an island is
+                              # metallic
+ISLAND_BACKGROUND     = 0.03  # probability a site out on the host sheet is
+                              # metallic anyway -- a light sprinkle, so the
+                              # sheet reads as an alloy rather than a mask
+ISLAND_SPACING        = 0.85  # keep centres this many combined radii apart,
+                              # so the islands stay distinct
+ISLAND_INSET          = 0.55  # keep centres this many radii inside the edge
+
+# --- composition gradient (COMPOSITION_MODE = "gradient") ---------------------
 GRADIENT_AXIS         = "x"   # "x" or "y": which way the composition ramps
 GRADIENT_MIN          = 0.00  # x at the low end (left, for GRADIENT_AXIS "x")
 GRADIENT_MID          = 0.50  # x through the middle band
@@ -107,10 +137,11 @@ CONNECT_INTERLAYER = False   # False: clusters are strictly in-plane (2D, the
                              # True: also link metallic sites in adjacent
                              # A-planes (3D percolation, p_c is much lower).
 
-CRO2_CAPS  = True            # Keep a complete CrO2 slab on BOTH sides of the
-                             # A-plane, giving the three-layer sandwich
-                             # CrO2 | Cu/Pd | CrO2. With False, only the bare
-                             # A-plane(s) are kept.
+CRO2_SLABS = 1               # Complete CrO2 slabs to keep around the
+                             # A-plane(s): 0 = the bare A-plane on its own,
+                             # 1 = one slab above it (the two-layer figure),
+                             # 2 = one either side (a CrO2 | Cu/Pd | CrO2
+                             # sandwich).
 N_A_PLANES = 1               # How many A-planes to keep, counted from the
                              # bottom. The R-3m hexagonal cell stacks THREE
                              # A-planes per unit cell (ABC), which overlap
@@ -127,7 +158,7 @@ COLOR_MODE = "species"       # "species"  : metallic vs host colours (the figure
 # sRGB hex, sampled from the reference figure. Edit freely.
 COLORS = {
     "metal_site":  "#A64DF6",   # metallic A site (Pd in the figure) - purple
-    "host_site":   "#F6B191",   # insulating A site (Cu)             - orange
+    "host_site":   "#E8B04A",   # insulating A site (Cu)             - gold
     "Cr":          "#7474D3",   # B site                             - indigo
     "O":           "#E84C2D",   # oxygen                             - red
     "bond":        "#B9B9C2",   # chemical bonds (Cu-O, Cr-O)        - grey
@@ -146,7 +177,7 @@ RADII = {
 DEFAULT_RADIUS = 0.45
 
 # --- layer stacking ----------------------------------------------------------
-LAYER_GAP        = 0.0       # extra vertical distance (A) inserted between the
+LAYER_GAP        = 7.0       # extra vertical distance (A) inserted between the
                              # Cu (A) planes and the CrO2 slabs on either side
                              # of them. 0 = the true crystal spacing; a couple
                              # of Angstrom pulls the layers apart so the
@@ -160,8 +191,10 @@ SLAB_TOL         = 1.4       # (A) height gap that separates one O-Cr-O slab
 
 # --- what to draw ------------------------------------------------------------
 SHOW_ATOMS        = True
-SHOW_BONDS        = False    # chemical Cu-O / Cr-O bonds (off = figure style)
-SHOW_VERTICAL_BONDS = True   # False drops every bond that runs between layers
+SHOW_BONDS        = True     # chemical Cu-O / Cr-O bonds. With the vertical
+                            # ones excluded below, what is left is the CrO6
+                            # octahedral network inside the CrO2 slab.
+SHOW_VERTICAL_BONDS = False  # False drops every bond that runs between layers
                              # (the vertical Cu-O struts, and the interlayer
                              # rungs of the channel network when
                              # CONNECT_INTERLAYER is on), leaving only the
@@ -212,6 +245,9 @@ BACKGROUND_MODE        = "gradient"
                                 #   instead if the slide itself is blue.
 BACKGROUND_COLOR       = "#0A2A5E"  # deep blue, sampled from Reference 1
 BACKGROUND_TOP_COLOR   = "#12539E"  # brighter blue at the top of the gradient
+BACKGROUND_MARGIN      = 1.15   # how far the backdrop oversizes the frame
+BACKGROUND_STEPS       = 48     # rows the gradient is built from
+BACKGROUND_SMOOTH      = True   # ease the gradient instead of ramping it
 ORTHOGRAPHIC           = False  # False gives a normal perspective camera,
                                 # which is what makes the three-layer sandwich
                                 # read as a solid rather than a flat pattern
@@ -695,35 +731,114 @@ def gradient_fraction(t):
     return GRADIENT_MID + (GRADIENT_MAX - GRADIENT_MID) * _ease(u)
 
 
-def site_fractions(a_positions, x_metal):
+def _sheet_bounds(a_positions):
+    xs = [p.x for p in a_positions] or [0.0]
+    ys = [p.y for p in a_positions] or [0.0]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def island_targets(a_positions, rng):
     """
-    Target metallic fraction for every A site, and where each site sits across
-    the sheet (0..1 along GRADIENT_AXIS). Without a gradient every site gets
-    the same fraction and the position is only used for the report.
+    Scatter ISLAND_COUNT metallic islands over an otherwise host sheet.
+
+    An island is a blob rather than a disc: its radius is modulated by a few
+    harmonics of the polar angle, so the outline is irregular, and the rim is
+    soft -- the probability falls from ISLAND_FILL to ISLAND_BACKGROUND across
+    a band ISLAND_EDGE wide. Between them those two frays the coastline into
+    something a substituted alloy might actually produce, instead of a circle
+    someone drew on.
+
+    Returns (per-site probability, [(cx, cy, radius, harmonics)]).
     """
-    if GRADIENT_AXIS not in ("x", "y"):
-        raise ValueError(f"GRADIENT_AXIS must be 'x' or 'y'; got {GRADIENT_AXIS!r}")
-    vals = [getattr(p, GRADIENT_AXIS) for p in a_positions]
-    lo, hi = (min(vals), max(vals)) if vals else (0.0, 1.0)
-    span = max(hi - lo, 1e-9)
-    where = [(v - lo) / span for v in vals]
-    if x_metal is None:
-        return [gradient_fraction(t) for t in where], where
-    return [x_metal] * len(a_positions), where
+    n = max(int(ISLAND_COUNT), 0)
+    x0, x1, y0, y1 = _sheet_bounds(a_positions)
+    base = ISLAND_RADIUS * min(x1 - x0, y1 - y0)
+
+    islands = []
+    for _ in range(n):
+        r = max(base * (1.0 + ISLAND_RADIUS_JITTER * (rng.random() * 2.0 - 1.0)),
+                1e-3)
+        harmonics = [(rng.uniform(0.4, 1.0), rng.uniform(0.0, 2.0 * pi), k)
+                     for k in (2, 3, 5)]
+        inset = r * ISLAND_INSET
+        lox, hix = x0 + inset, x1 - inset
+        loy, hiy = y0 + inset, y1 - inset
+        if lox > hix:
+            lox = hix = 0.5 * (x0 + x1)
+        if loy > hiy:
+            loy = hiy = 0.5 * (y0 + y1)
+        cx, cy = 0.5 * (lox + hix), 0.5 * (loy + hiy)
+        for _attempt in range(200):
+            cx, cy = rng.uniform(lox, hix), rng.uniform(loy, hiy)
+            if all(hypot(cx - ox, cy - oy) >= (r + orad) * ISLAND_SPACING
+                   for ox, oy, orad, _ in islands):
+                break
+        islands.append((cx, cy, r, harmonics))
+
+    def blob_radius(island, angle):
+        _, _, r, harmonics = island
+        m = 1.0
+        for amp, phase, k in harmonics:
+            m += ISLAND_WOBBLE * amp * cos(k * angle + phase) / len(harmonics)
+        return r * max(m, 0.25)
+
+    lo_p = min(max(ISLAND_BACKGROUND, 0.0), 1.0)
+    hi_p = min(max(ISLAND_FILL, 0.0), 1.0)
+    targets = []
+    for p in a_positions:
+        best = lo_p
+        for island in islands:
+            cx, cy, _, _ = island
+            dx, dy = p.x - cx, p.y - cy
+            rim = blob_radius(island, atan2(dy, dx))
+            edge = max(ISLAND_EDGE * rim, 1e-6)
+            # 1 just inside the rim, 0 just outside it
+            u = (rim + 0.5 * edge - hypot(dx, dy)) / edge
+            best = max(best, lo_p + (hi_p - lo_p) * _ease_clamped(u))
+        targets.append(best)
+    return targets, islands
+
+
+def _ease_clamped(u):
+    u = min(max(u, 0.0), 1.0)
+    return u * u * (3.0 - 2.0 * u)
+
+
+def site_targets(a_positions, x_metal, rng):
+    """
+    Target metallic fraction for every A site, plus whatever the composition
+    mode wants to report about itself.
+    """
+    if COMPOSITION_MODE == "islands":
+        targets, islands = island_targets(a_positions, rng)
+        return targets, {"islands": islands}
+
+    if COMPOSITION_MODE == "gradient":
+        if GRADIENT_AXIS not in ("x", "y"):
+            raise ValueError("GRADIENT_AXIS must be 'x' or 'y'; got "
+                             f"{GRADIENT_AXIS!r}")
+        vals = [getattr(p, GRADIENT_AXIS) for p in a_positions]
+        lo, hi = (min(vals), max(vals)) if vals else (0.0, 1.0)
+        span = max(hi - lo, 1e-9)
+        where = [(v - lo) / span for v in vals]
+        return [gradient_fraction(t) for t in where], {"where": where}
+
+    if COMPOSITION_MODE != "uniform":
+        raise ValueError("COMPOSITION_MODE must be 'islands', 'gradient' or "
+                         f"'uniform'; got {COMPOSITION_MODE!r}")
+    frac = METAL_FRACTION if x_metal is None else x_metal
+    return [frac] * len(a_positions), {}
 
 
 def _crop_to_layers(atoms):
     """
-    Keep N_A_PLANES A-planes and, with CRO2_CAPS on, the complete CrO2 slab on
-    either side of them -- the three-layer sandwich CrO2 | Cu/Pd | CrO2.
+    Keep N_A_PLANES A-planes plus CRO2_SLABS complete CrO2 slabs around them:
+    none, one above, or one either side.
 
     The cuts run just inside the neighbouring A-planes rather than midway to
     them. An O-Cr-O slab sits centred between two A-planes, so a cut at the
     midpoint would slice the slab in half and leave one of its oxygen sheets
     behind.
-
-    The kept planes are taken from the middle of the stack, so there is a
-    neighbouring plane on both sides to cut against.
     """
     if not N_A_PLANES:
         return atoms
@@ -732,22 +847,24 @@ def _crop_to_layers(atoms):
     keep = max(int(N_A_PLANES), 1)
     if len(levels) < keep:
         return atoms
+    slabs = min(max(int(CRO2_SLABS), 0), 2)
 
-    start = max((len(levels) - keep) // 2, 0)
+    # with a slab wanted on both sides the kept planes have to come from the
+    # middle of the stack, so there is a neighbour to cut against either way
+    start = max((len(levels) - keep) // 2, 0) if slabs >= 2 else 0
     window = levels[start:start + keep]
+    gaps = [levels[i + 1] - levels[i] for i in range(len(levels) - 1)]
+    spacing = min(gaps) if gaps else PLANE_TOL * 2
 
-    if not CRO2_CAPS:
-        lo, hi = window[0] - PLANE_TOL, window[-1] + PLANE_TOL
-    else:
-        gaps = [levels[i + 1] - levels[i] for i in range(len(levels) - 1)]
-        spacing = min(gaps) if gaps else PLANE_TOL * 2
-        has_below, has_above = start > 0, start + keep < len(levels)
-        if not (has_below and has_above):
-            print("[cucro2] WARNING: not enough A-planes to cap both sides "
-                  "with a complete CrO2 slab -- raise N_CELLS[2].")
-        below = levels[start - 1] if has_below else window[0] - spacing
-        above = levels[start + keep] if has_above else window[-1] + spacing
-        lo, hi = below + PLANE_TOL, above - PLANE_TOL
+    has_below, has_above = start > 0, start + keep < len(levels)
+    if (slabs >= 2 and not has_below) or (slabs >= 1 and not has_above):
+        print("[cucro2] WARNING: not enough A-planes to take "
+              f"{slabs} complete CrO2 slab(s) -- raise N_CELLS[2].")
+
+    below = levels[start - 1] if has_below else window[0] - spacing
+    above = levels[start + keep] if has_above else window[-1] + spacing
+    lo = below + PLANE_TOL if slabs >= 2 else window[0] - PLANE_TOL
+    hi = above - PLANE_TOL if slabs >= 1 else window[-1] + PLANE_TOL
     return [p for p in atoms if lo <= p[1].z <= hi]
 
 
@@ -1094,7 +1211,8 @@ def make_material(name, linear_rgb, alpha):
     return mat
 
 
-def add_mesh_object(name, verts, faces, mat, collection):
+def add_mesh_object(name, verts, faces, mat, collection, colors=None,
+                    attr_name="Color", smooth=True):
     if not verts:
         return None
     mesh = bpy.data.meshes.new(name)
@@ -1103,7 +1221,16 @@ def add_mesh_object(name, verts, faces, mat, collection):
     if mat:
         mesh.materials.append(mat)
     for poly in mesh.polygons:
-        poly.use_smooth = True
+        poly.use_smooth = smooth
+    if colors is not None:
+        try:
+            attr = mesh.color_attributes.new(name=attr_name,
+                                             type="FLOAT_COLOR",
+                                             domain="POINT")
+            for i, c in enumerate(colors):
+                attr.data[i].color = (c[0], c[1], c[2], 1.0)
+        except Exception as e:
+            print(f"[cucro2] could not write colour attribute: {e}")
     obj = bpy.data.objects.new(name, mesh)
     collection.objects.link(obj)
     return obj
@@ -1155,7 +1282,7 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
                          "to one of these.")
     a_pos = [atoms[i][1] for i in a_idx]
 
-    target, where = site_fractions(a_pos, x_metal)
+    target, info = site_targets(a_pos, x_metal, rng)
     is_metal = [rng.random() < t for t in target]
     labels, clusters, channel_pairs, spanning, nn = percolation_analysis(a_pos, is_metal)
 
@@ -1169,7 +1296,10 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
         if len(ids) > biggest:
             biggest_id, biggest = cid, len(ids)
 
-    if x_metal is None:
+    if "islands" in info:
+        print(f"\n--- panel {panel_index}: {len(info['islands'])} metallic "
+              f"island(s) on a host sheet ---")
+    elif "where" in info:
         print(f"\n--- panel {panel_index}: composition gradient along "
               f"{GRADIENT_AXIS}, x = {GRADIENT_MIN:.2f} -> {GRADIENT_MID:.2f} "
               f"-> {GRADIENT_MAX:.2f} ---")
@@ -1189,8 +1319,11 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
           f"{'YES -- percolating (metallic)' if spanning else 'no -- disconnected (insulating)'}")
     print("  2D triangular-lattice site percolation threshold: p_c = 0.5")
 
-    if x_metal is None:
-        _report_gradient(a_pos, where, target, is_metal, labels, biggest_id, nn)
+    if "islands" in info:
+        _report_islands(a_pos, info["islands"], is_metal, labels, clusters)
+    elif "where" in info:
+        _report_gradient(a_pos, info["where"], target, is_metal, labels,
+                         biggest_id, nn)
 
     # ---------------- layer gap ----------------
     # Everything above ran on the true crystal geometry. Now that the bonds
@@ -1320,6 +1453,33 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
     return width, bounds
 
 
+def _report_islands(a_pos, islands, is_metal, labels, clusters):
+    """
+    What each island actually came out as. The interesting number is the last
+    one: an island only conducts if its metallic sites join up into a single
+    cluster, so a count above 1 means the island is internally broken.
+    """
+    n_metal = sum(1 for m in is_metal if m)
+    print(f"  host sheet: {len(a_pos) - n_metal} sites "
+          f"({(len(a_pos) - n_metal) / max(len(a_pos), 1) * 100:.0f}%), "
+          f"metallic: {n_metal} ({n_metal / max(len(a_pos), 1) * 100:.0f}%)")
+    print("     island   centre (A)         radius   sites   metallic   clusters")
+    for n, (cx, cy, r, _) in enumerate(islands, 1):
+        near = [k for k, p in enumerate(a_pos)
+                if hypot(p.x - cx, p.y - cy) <= r * (1.0 + ISLAND_WOBBLE)]
+        met = [k for k in near if is_metal[k]]
+        cl = {labels[k] for k in met}
+        biggest = max((sum(1 for k in met if labels[k] == c) for c in cl),
+                      default=0)
+        print(f"     {n:^6d}   ({cx:6.1f}, {cy:6.1f})   {r:6.2f}   "
+              f"{len(near):5d}   {len(met):5d}      {len(cl)}"
+              + (f" (largest {biggest})" if len(cl) > 1 else " -- connected"))
+    stray = sum(1 for k, p in enumerate(a_pos) if is_metal[k] and
+                all(hypot(p.x - cx, p.y - cy) > r * (1.0 + ISLAND_WOBBLE)
+                    for cx, cy, r, _ in islands))
+    print(f"  stray metallic sites out on the host sheet: {stray}")
+
+
 def _report_gradient(a_pos, where, target, is_metal, labels, biggest_id, nn):
     """
     Break the sheet into slices along the gradient and report what each one
@@ -1395,58 +1555,99 @@ def _mix(c1, c2, t):
     return tuple(a + (b - a) * t for a, b in zip(c1, c2))
 
 
-def background_gradient_image(name, bottom, top, height=512):
-    """
-    A 4 x `height` float image holding the vertical background gradient.
-
-    Painting the gradient into an image and compositing it behind the render
-    is the one approach that works for every camera: a world-space gradient
-    collapses under an orthographic camera, because every view ray then points
-    the same way and the world shader has nothing left to vary over.
-    """
-    img = bpy.data.images.get(name)
-    if img:
-        bpy.data.images.remove(img)
-    img = bpy.data.images.new(name, 4, height, alpha=True, float_buffer=True)
-    flat = []
-    for row in range(height):                    # row 0 is the bottom row
-        r, g, b = _mix(bottom, top, row / (height - 1.0))
-        flat.extend((r, g, b, 1.0) * 4)
-    try:
-        img.pixels.foreach_set(flat)
-    except Exception:
-        img.pixels = flat
-    return img
-
-
-def setup_compositor(scene, bottom, top):
-    """Lay the rendered image, alpha and all, over the gradient."""
-    scene.use_nodes = True
-    nt = scene.node_tree
+def emission_vertex_material(name, attr_name):
+    """Flat emission driven by a per-vertex colour attribute."""
+    mat = bpy.data.materials.get(name)
+    if mat:
+        return mat
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
     nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    out.location = (300, 0)
+    emis = nt.nodes.new("ShaderNodeEmission")
+    emis.location = (100, 0)
+    emis.inputs["Strength"].default_value = 1.0
+    attr = nt.nodes.new("ShaderNodeAttribute")
+    attr.location = (-150, 0)
+    attr.attribute_name = attr_name
+    nt.links.new(attr.outputs["Color"], emis.inputs["Color"])
+    nt.links.new(emis.outputs["Emission"], out.inputs["Surface"])
+    return mat
 
-    rl = nt.nodes.new("CompositorNodeRLayers")
-    rl.location = (-500, 100)
-    img = nt.nodes.new("CompositorNodeImage")
-    img.location = (-500, -220)
-    img.image = background_gradient_image("BackgroundGradient", bottom, top)
-    scale = nt.nodes.new("CompositorNodeScale")
-    scale.location = (-280, -220)
+
+def add_background_plane(scene, cam, target, up_hint, bottom, top, reach):
+    """
+    The background is an emissive quad placed behind everything and sized to
+    fill the frame, with the gradient baked into its vertex colours.
+
+    This replaces compositing a generated image behind the render, which is
+    where the background was going missing: bpy.data.images.new() makes an
+    image whose source is GENERATED, and Blender rebuilds a generated image's
+    buffer from its own settings whenever it re-evaluates it. The gradient
+    poked in from Python was therefore not there at render time -- the Image
+    node handed the compositor an empty frame, and the background came out
+    transparent. Geometry and vertex colours have nothing to regenerate, and
+    behave identically in EEVEE and Cycles under either projection.
+    """
+    loc = Vector(cam.location)
+    forward = (target - loc)
+    if forward.length < 1e-9:
+        return None
+    forward = forward.normalized()
+    right = forward.cross(up_hint)
+    right = right.normalized() if right.length > 1e-6 else Vector((1.0, 0.0, 0.0))
+    up = right.cross(forward).normalized()
+
+    centre = target + forward * (reach * 2.0 + 1.0)
+    res_x, res_y = RESOLUTION
+    aspect = res_x / float(res_y)
+    if cam.data.type == "ORTHO":
+        s = cam.data.ortho_scale
+        half_w = 0.5 * (s if aspect >= 1.0 else s * aspect)
+        half_h = 0.5 * (s / aspect if aspect >= 1.0 else s)
+    else:
+        tan_h = 18.0 / max(cam.data.lens, 1e-3)     # 36 mm sensor, half-angle
+        half_w = (centre - loc).length * tan_h
+        half_h = half_w / aspect
+    half_w *= BACKGROUND_MARGIN
+    half_h *= BACKGROUND_MARGIN
+
+    rows = max(int(BACKGROUND_STEPS), 2)
+    verts, faces, colors = [], [], []
+    for i in range(rows + 1):
+        t = i / rows
+        c = _mix(bottom, top, _ease_clamped(t) if BACKGROUND_SMOOTH else t)
+        y = (2.0 * t - 1.0) * half_h
+        for side in (-1.0, 1.0):
+            p = centre + right * (side * half_w) + up * y
+            verts.append((p.x, p.y, p.z))
+            colors.append(c)
+    for i in range(rows):
+        b = 2 * i
+        faces.append((b, b + 1, b + 3, b + 2))
+
+    mat = emission_vertex_material("Background", "BackgroundColor")
+    obj = add_mesh_object("Background", verts, faces, mat,
+                          get_collection("CuCrO2_Background"), colors=colors,
+                          attr_name="BackgroundColor", smooth=False)
+    if obj is None:
+        return None
+    # a backdrop, not a light: keep it out of everything but the camera ray
+    for attr in ("visible_diffuse", "visible_glossy", "visible_transmission",
+                 "visible_volume_scatter", "visible_shadow"):
+        try:
+            setattr(obj, attr, False)
+        except Exception:
+            pass
+    need = (centre - loc).length + max(half_w, half_h) * 2.0
     try:
-        scale.space = "RENDER_SIZE"
-        scale.frame_method = "STRETCH"
+        if cam.data.clip_end < need:
+            cam.data.clip_end = need * 1.2
     except Exception:
         pass
-    nt.links.new(img.outputs["Image"], scale.inputs["Image"])
-
-    over = nt.nodes.new("CompositorNodeAlphaOver")
-    over.location = (-40, 0)
-    nt.links.new(scale.outputs["Image"], over.inputs[1])      # background
-    nt.links.new(rl.outputs["Image"], over.inputs[2])         # foreground
-
-    comp = nt.nodes.new("CompositorNodeComposite")
-    comp.location = (200, 0)
-    nt.links.new(over.outputs["Image"], comp.inputs["Image"])
+    return obj
 
 
 def setup_render(scene):
@@ -1454,9 +1655,10 @@ def setup_render(scene):
     r = scene.render
     r.resolution_x, r.resolution_y = RESOLUTION
     r.resolution_percentage = 100
-    # "gradient" renders on a transparent film too and puts the blue back in
-    # the compositor, which is what lets the gradient be exact in screen space
-    r.film_transparent = BACKGROUND_MODE in ("transparent", "gradient")
+    # The backdrop is an object in the scene, so the film can stay
+    # transparent in every mode: where there is no backdrop the render simply
+    # comes out with an alpha channel.
+    r.film_transparent = True
 
     # RGBA is the part people miss: with the film transparent but the colour
     # mode left at RGB, the alpha channel is dropped on save and the
@@ -1494,10 +1696,8 @@ def setup_render(scene):
 
 def setup_world(scene):
     """
-    In "flat" mode the world *is* the background, so it carries the blue and
-    doubles as a dim blue ambient. In the other two modes the film is
-    transparent and the world is never seen, so it is a neutral fill light at
-    AMBIENT_STRENGTH instead.
+    The world is only ever a neutral fill light here -- the visible background
+    is the backdrop object, so the world never has to double as one.
     """
     world = scene.world or bpy.data.worlds.new("World")
     scene.world = world
@@ -1505,12 +1705,8 @@ def setup_world(scene):
     bg = world.node_tree.nodes.get("Background")
     if not bg:
         return
-    if BACKGROUND_MODE == "flat":
-        bg.inputs["Color"].default_value = (*hex_to_linear(BACKGROUND_COLOR), 1.0)
-        bg.inputs["Strength"].default_value = 1.0
-    else:
-        bg.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
-        bg.inputs["Strength"].default_value = AMBIENT_STRENGTH
+    bg.inputs["Color"].default_value = (1.0, 1.0, 1.0, 1.0)
+    bg.inputs["Strength"].default_value = AMBIENT_STRENGTH
 
 
 def _add_sun(scene, name, direction, energy, softness=0.25):
@@ -1615,15 +1811,19 @@ def setup_scene(bounds):
     setup_world(scene)
     if ADD_LIGHTS:
         setup_lights(scene)
-    setup_camera(scene, bounds)
-    if BACKGROUND_MODE == "gradient":
-        try:
-            setup_compositor(scene, hex_to_linear(BACKGROUND_COLOR),
-                             hex_to_linear(BACKGROUND_TOP_COLOR))
-        except Exception as e:
-            print(f"[cucro2] background gradient skipped: {e}")
-    else:
-        scene.use_nodes = False
+    cam = setup_camera(scene, bounds)
+
+    if BACKGROUND_MODE in ("gradient", "flat"):
+        x0, x1, y0, y1, z0, z1 = bounds
+        target = Vector((0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (z0 + z1)))
+        reach = max((Vector((x, y, z)) - target).length
+                    for x in (x0, x1) for y in (y0, y1) for z in (z0, z1))
+        bottom = hex_to_linear(BACKGROUND_COLOR)
+        top = (hex_to_linear(BACKGROUND_TOP_COLOR)
+               if BACKGROUND_MODE == "gradient" else bottom)
+        add_background_plane(scene, cam, target, Vector((0.0, 0.0, 1.0)),
+                             bottom, top, reach)
+    scene.use_nodes = False
     return engine
 
 
@@ -1636,11 +1836,12 @@ def main():
         clear_scene()
 
     struct = load_structure()
-    if COMPOSITION_GRADIENT:
+    if COMPOSITION_MODE in ("islands", "gradient"):
         if COMPOSITION_SERIES:
-            print("[cucro2] COMPOSITION_GRADIENT is on, so COMPOSITION_SERIES "
-                  "is ignored: the gradient is one sheet, not a series.")
-        comps = [None]          # None means "ramp the composition across it"
+            print(f"[cucro2] COMPOSITION_MODE is {COMPOSITION_MODE!r}, so "
+                  "COMPOSITION_SERIES is ignored: this is one sheet, not a "
+                  "series.")
+        comps = [None]          # None means "the mode decides, site by site"
     else:
         comps = COMPOSITION_SERIES if COMPOSITION_SERIES else [METAL_FRACTION]
     rng = random.Random(RANDOM_SEED)
