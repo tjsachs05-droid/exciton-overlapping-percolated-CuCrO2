@@ -59,6 +59,24 @@ render opaque where it is present.
 Set `OUTPUT_PATH` and `RENDER_NOW = True` in either script to render to a
 file as soon as it finishes building.
 
+## Framing
+
+Both cameras fit the **vertices actually built** rather than an estimated
+bounding box. An estimate has to guess how far the drawn geometry reaches —
+sphere tessellation, bond caps, the widest display radius, the width of the
+exciton's tail band — and whatever it misses is what the frame clips off.
+
+The fit itself is exact: every point is projected onto the camera's own right
+and up axes, and because those two components do not change as the camera
+slides along its view direction, each point sets a lower bound on the
+distance and the largest of them frames the lot. Each script prints how much
+of the frame the result uses.
+
+A wide flat sheet seen from a low `CAMERA_ELEVATION` is far wider than it is
+tall, so it fills the frame across and leaves air above and below — at 5
+degrees it uses about a quarter of the frame's height. Raise the elevation or
+widen `RESOLUTION` if that bothers you.
+
 ## Knobs worth knowing
 
 `exciton.py`
@@ -113,9 +131,12 @@ file as soon as it finishes building.
   A-planes, so a midpoint cut would slice it in half.
 * `ORTHOGRAPHIC`, `CAMERA_ELEVATION`, `CAMERA_AZIMUTH`, `CAMERA_LENS` — the
   camera is a perspective one by default, looking down at the sheet from
-  `CAMERA_ELEVATION` degrees above its plane, which is what makes the
-  sandwich read as a solid. The azimuth decides which way the gradient runs
-  across the frame; -90 lays it left to right.
+  `CAMERA_ELEVATION` degrees above its plane, which is what makes the layers
+  read as solids. The azimuth decides which way the sheet runs across the
+  frame; -90 lays the x axis left to right.
+* `CAMERA_MARGIN` — air around the structure. The camera fits the geometry
+  exactly, so at 1.0 the outermost atoms sit precisely on the frame edge and
+  this is pure breathing room.
 * `COLOR_MODE` — `"species"`, `"spanning"` or `"clusters"`.
 * `LAYER_GAP` — extra vertical distance between the Cu planes and the CrO2
   slabs. Bonds, neighbours and the percolation analysis are all computed on
