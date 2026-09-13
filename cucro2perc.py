@@ -68,19 +68,19 @@ from mathutils import Vector
 CIF_PATH = r"C:\path\to\CuCrO2.cif"     # <-- EDIT (falls back to built-in data)
 
 # --- supercell / orientation -------------------------------------------------
-N_CELLS        = (16, 16, 1) # unit cells along a, b, c. Keep nz small: c = 17 A.
+N_CELLS        = (36, 36, 1) # unit cells along a, b, c. Keep nz small: c = 17 A.
                              # A composition gradient needs a wide sheet to
                              # read -- with only a handful of sites per slice
                              # the statistics are noise, not a ramp.
 VIEW_DIRECTION = "001"       # "001" looks down c (the figure's view); also
                              # accepts "100", "110", "111", etc.
-LATTICE_SCALE  = 1.0         # multiplies the CIF lattice parameters
+LATTICE_SCALE  = 1.2         # multiplies the CIF lattice parameters
 
 # --- percolation -------------------------------------------------------------
 A_SITE_ELEMENT   = "Cu"      # element on the A site that gets substituted
 METAL_FRACTION   = 0.50      # x: probability an A site is metallic (Pd-like).
                              # Used only by COMPOSITION_MODE = "uniform".
-RANDOM_SEED      = 1         # change for a different random configuration
+RANDOM_SEED      = 6         # change for a different random configuration
 
 # --- how the composition is laid out ------------------------------------------
 COMPOSITION_MODE      = "islands"
@@ -94,7 +94,7 @@ COMPOSITION_MODE      = "islands"
 
 # --- metallic islands ---------------------------------------------------------
 ISLAND_COUNT          = 3     # how many metallic islands to drop on the sheet
-ISLAND_RADIUS         = 0.22  # mean island radius, as a fraction of the
+ISLAND_RADIUS         = 0.18  # mean island radius, as a fraction of the
                               # sheet's shorter side. Three at 0.22 cover
                               # roughly a third of it, so the host stays the
                               # clear majority.
@@ -191,7 +191,7 @@ SLAB_TOL         = 1.4       # (A) height gap that separates one O-Cr-O slab
 
 # --- what to draw ------------------------------------------------------------
 SHOW_ATOMS        = True
-SHOW_BONDS        = True     # chemical Cu-O / Cr-O bonds. With the vertical
+SHOW_BONDS        = False     # chemical Cu-O / Cr-O bonds. With the vertical
                             # ones excluded below, what is left is the CrO6
                             # octahedral network inside the CrO2 slab.
 SHOW_VERTICAL_BONDS = False  # False drops every bond that runs between layers
@@ -202,7 +202,7 @@ SHOW_VERTICAL_BONDS = False  # False drops every bond that runs between layers
 VERTICAL_BOND_ANGLE = 40.0   # degrees: a bond counts as "vertical" when it
                              # sits within this angle of the stacking axis
 SHOW_CHANNELS     = True     # purple network linking adjacent metallic sites
-SHOW_LATTICE_GUIDE = False   # faint network over ALL A sites (figure's dashes)
+SHOW_LATTICE_GUIDE = True   # faint network over ALL A sites (figure's dashes)
 SHOW_A_SITES      = True
 SHOW_B_SITES      = True     # Cr
 SHOW_OXYGEN       = True
@@ -252,11 +252,11 @@ ORTHOGRAPHIC           = False  # False gives a normal perspective camera,
                                 # which is what makes the three-layer sandwich
                                 # read as a solid rather than a flat pattern
 CAMERA_LENS            = 50.0   # focal length in mm, for the perspective camera
-CAMERA_ELEVATION       = 55.0   # degrees above the plane of the sheet. 90 is
+CAMERA_ELEVATION       = 0.0   # degrees above the plane of the sheet. 90 is
                                 # straight down (a plan view, where the
                                 # sandwich is edge-on and invisible); lower
                                 # angles show its thickness.
-CAMERA_AZIMUTH         = -90.0  # degrees around the sheet, measured from +x.
+CAMERA_AZIMUTH         = 60.0  # degrees around the sheet, measured from +x.
                                 # -90 puts the camera on the -y side, which
                                 # lays the GRADIENT_AXIS left-to-right across
                                 # the frame.
