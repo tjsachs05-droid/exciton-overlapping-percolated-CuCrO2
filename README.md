@@ -7,7 +7,7 @@ transparent backgrounds in PowerPoint.
 | script | draws |
 | --- | --- |
 | `cucro2perc.py` | a Cu/Pd plane under a CrO2 slab, with large metallic islands scattered over an otherwise gold host sheet (or a composition gradient, or a uniform alloy) |
-| `exciton.py` | a small electron orbiting a larger hole, with a Saturn-ring motion tail behind it and a volumetric aura between the two |
+| `exciton.py` | a small electron orbiting a larger hole, with a dashed Saturn-ring motion tail behind it, a volumetric aura between the two, and a funnel of light down to the layer below |
 
 Both take their palette from `Reference 1` in this repo: a deep blue field, a
 hot pink-red hole at the centre, a bright cyan electron going round it, pale
@@ -90,14 +90,31 @@ widen `RESOLUTION` if that bothers you.
   the electron is on its circle around the hole and which way it travels.
   `ORBIT_PHASE` is measured from the right of frame, so 0 puts the electron
   at the right-hand edge of the path and 90 nearest the camera.
-* The motion tail is a **band**, not a line: `TRAIL_STRANDS` concentric
-  strands lying flat in the orbit plane over `TRAIL_WIDTH`, like the rings of
-  Saturn. `TRAIL_LENGTH` and `TRAIL_FALLOFF` set how far back it reaches and
-  how fast it fades; `TRAIL_SHEAR` makes the outer strands trail longer so
-  the tail feathers out instead of ending on a straight edge;
-  `TRAIL_EDGE_FADE` dims the outer strands so the band has a bright spine.
-* `TRAIL_RING_LEVEL` sets how brightly the rest of each circle shows. At 0
-  the circles are cut short and only the tail is drawn.
+* **`BINDING_STRENGTH`** is the main dial: 1.0 is a tightly bound pair,
+  0.0 a barely bound one. Everything in `USER PARAMETERS` describes the
+  strong end, and the `WEAK_` block holds the other end of each quantity it
+  drives — orbit radius, aura density and reach, tail length and brightness,
+  halo size and opacity, funnel brightness, overall emission, and how far the
+  colours wash toward grey. It moves all of them together on purpose: at
+  these sizes one quantity changing by 30% does not read, but the whole model
+  loosening and fading at once does.
+* The motion tail is a **dashed band**: `TRAIL_STRANDS` concentric strands
+  lying flat in the orbit plane over `TRAIL_WIDTH`, like the rings of Saturn,
+  each solid for the first `TRAIL_SOLID` of its length and then breaking into
+  dashes. `TRAIL_DASH_LENGTH` and `TRAIL_DASH_GAP` set the first dash and the
+  first gap; `TRAIL_DASH_FALLOFF` shortens the dashes going back and
+  `TRAIL_DASH_GROWTH` opens the gaps, so they arrive less and less often
+  until `TRAIL_DASH_MIN` ends the tail. Set `TRAIL_STRANDS = 1` for a single
+  dashed line instead of a band.
+* `TRAIL_SHEAR` makes the outer strands trail longer so the tail feathers out
+  instead of ending on a straight edge; `TRAIL_EDGE_FADE` dims the outer
+  strands so the band has a bright spine.
+* `SHOW_FUNNEL` drops a cone of light from the exciton to the layer below it,
+  as in `Reference 1`, with `SHOW_FUNNEL_POOL` lighting the spot where it
+  lands. `FUNNEL_FLARE` above 1 holds it narrow out of the exciton and opens
+  it near the bottom — the trumpet shape rather than a plain cone. This is
+  what ties the exciton to the lattice instead of leaving it floating over
+  the top, so it is worth keeping once the two renders are combined.
 * `SHOW_FIELD_LINES` — the full dipole streamline bundle, off by default.
   The physics is unchanged; it is just no longer what carries the picture.
 * `AURA_MARGIN` — the aura is a spindle sitting directly between the two
