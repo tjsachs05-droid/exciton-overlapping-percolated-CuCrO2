@@ -90,12 +90,34 @@ COMPOSITION_MODE      = "islands"
                               #   METAL_FRACTION or COMPOSITION_SERIES
 
 # --- metallic islands ---------------------------------------------------------
-ISLAND_COUNT          = 3     # how many metallic islands to drop on the sheet
-ISLAND_RADIUS         = 0.18  # mean island radius, as a fraction of the
-                              # sheet's shorter side. Three at 0.22 cover
-                              # roughly a third of it, so the host stays the
-                              # clear majority.
-ISLAND_RADIUS_JITTER  = 0.22  # +/- this fraction on each island's radius
+# One island per entry in ISLAND_POSITIONS, all of them ISLAND_RADIUS across.
+# A position is (a, b): how far to step from the centre of the sheet along the
+# lattice's own a and b directions -- the two edges of the parallelogram the
+# sheet is built on, not the screen axes. Both are in the same unit as
+# ISLAND_RADIUS, fractions of the sheet's shorter side, so "do these two
+# islands touch?" is arithmetic you can do here: centres further apart than
+# 2 x ISLAND_RADIUS (plus a little for the ragged coast) do not.
+#
+# For the default VIEW_DIRECTION "001" of a hexagonal cell, a points straight
+# right across the screen and b points up and to the left at 120 degrees.
+ISLAND_RADIUS         = 0.15  # island radius as a fraction of the sheet's
+                              # shorter side
+ISLAND_POSITIONS      = (
+    ( 0.00, 0.00),            # one in the middle of the layer
+    (-0.40, 0.00),            # one a bit to the left along -a, clear of it
+)
+                              # These two defaults are as large and as far
+                              # left as the sheet allows: at 0.15 and -0.40
+                              # the second island is still wholly on the
+                              # rhombus and the coasts stay ~6 A apart (about
+                              # 1.6 rows of host sites) for every RANDOM_SEED
+                              # tried. Pushing the radius to 0.17 merged the
+                              # two into one cluster on 6 seeds in 30, and
+                              # stepping further left than -0.42 ran the
+                              # island off the edge -- the sheet is a
+                              # parallelogram, so it narrows towards the
+                              # corners and there is less room along a than
+                              # the bounding box suggests.
 ISLAND_WOBBLE         = 0.35  # how far the outline departs from a circle.
                               # 0 gives discs, which read as drawn-on rather
                               # than grown.
@@ -108,9 +130,6 @@ ISLAND_FILL           = 0.97  # probability a site well inside an island is
 ISLAND_BACKGROUND     = 0.03  # probability a site out on the host sheet is
                               # metallic anyway -- a light sprinkle, so the
                               # sheet reads as an alloy rather than a mask
-ISLAND_SPACING        = 0.85  # keep centres this many combined radii apart,
-                              # so the islands stay distinct
-ISLAND_INSET          = 0.55  # keep centres this many radii inside the edge
 
 # --- composition gradient (COMPOSITION_MODE = "gradient") ---------------------
 GRADIENT_AXIS         = "x"   # "x" or "y": which way the composition ramps
@@ -188,9 +207,13 @@ SLAB_TOL         = 1.4       # (A) height gap that separates one O-Cr-O slab
 
 # --- what to draw ------------------------------------------------------------
 SHOW_ATOMS        = True
-SHOW_BONDS        = False     # chemical Cu-O / Cr-O bonds. With the vertical
-                            # ones excluded below, what is left is the CrO6
-                            # octahedral network inside the CrO2 slab.
+SHOW_BONDS        = True     # chemical Cu-O / Cr-O bonds. With the vertical
+                             # ones excluded below, what is left is the CrO6
+                             # octahedral network inside the CrO2 slab: the
+                             # Cu-O bonds in a delafossite are the linear
+                             # O-Cu-O dumbbells along the stacking axis, and
+                             # those are exactly what the vertical filter
+                             # drops.
 SHOW_VERTICAL_BONDS = False  # False drops every bond that runs between layers
                              # (the vertical Cu-O struts, and the interlayer
                              # rungs of the channel network when
@@ -1156,7 +1179,9 @@ def build_supercell(struct):
     zmin = min(p[1].z for p in atoms)
     for p in atoms:
         p[1] = Vector((p[1].x - cx, p[1].y - cy, p[1].z - zmin))
-    return atoms, (va, vb, vc), stacking_axis(q, va, vb)
+    # the cell vectors go back rotated, like everything else here, so a
+    # caller can work in the lattice's own a and b directions on screen
+    return atoms, (q @ va, q @ vb, q @ vc), stacking_axis(q, va, vb)
 
 
 def _crop_to_layers(atoms):
@@ -1267,8 +1292,20 @@ def drop_vertical(segments, stack_axis):
 
 
 def chemical_bonds(atoms):
-    """Distance-based bonds using a spatial hash grid."""
-    cell = MAX_BOND_LENGTH
+    """
+    Distance-based bonds using a spatial hash grid.
+
+    The cutoffs below are covalent radii in true Angstrom, but the positions
+    handed in have already been multiplied by LATTICE_SCALE, which is a
+    display exaggeration rather than a change of structure. Scaling the
+    cutoffs to match is what keeps the bond list identical whatever
+    LATTICE_SCALE is set to. Without it the default 1.2 stretched every Cr-O
+    pair to 2.37 A against a 2.36 A cutoff -- missing by 0.01 A -- so the only
+    bonds left were the vertical Cu-O dumbbells, and SHOW_VERTICAL_BONDS then
+    dropped those too and the figure came out with no bonds at all.
+    """
+    s = max(LATTICE_SCALE, 1e-9)
+    cell = MAX_BOND_LENGTH * s
     grid = {}
     for i, (_, p) in enumerate(atoms):
         grid.setdefault((floor(p.x / cell), floor(p.y / cell), floor(p.z / cell)),
@@ -1286,8 +1323,8 @@ def chemical_bonds(atoms):
                         ej, pj = atoms[j]
                         d = (pj - pi).length
                         cutoff = min(BOND_FACTOR * (ri + covalent_radius(ej)),
-                                     MAX_BOND_LENGTH)
-                        if MIN_BOND_LENGTH < d <= cutoff:
+                                     MAX_BOND_LENGTH) * s
+                        if MIN_BOND_LENGTH * s < d <= cutoff:
                             bonds.append((i, j))
     return bonds
 
@@ -1337,50 +1374,53 @@ def _sheet_bounds(a_positions):
     return min(xs), max(xs), min(ys), max(ys)
 
 
-def island_targets(a_positions, rng):
+def island_targets(a_positions, cell, rng):
     """
-    Scatter ISLAND_COUNT metallic islands over an otherwise host sheet.
+    Put one metallic island at each entry in ISLAND_POSITIONS.
+
+    Each entry is (a, b): a step from the centre of the sheet along the
+    lattice's own a and b directions, in fractions of the sheet's shorter
+    side -- the same unit as ISLAND_RADIUS, so the two can be compared
+    directly when deciding whether two islands clear each other.
 
     An island is a blob rather than a disc: its radius is modulated by a few
     harmonics of the polar angle, so the outline is irregular, and the rim is
     soft -- the probability falls from ISLAND_FILL to ISLAND_BACKGROUND across
-    a band ISLAND_EDGE wide. Between them those two frays the coastline into
+    a band ISLAND_EDGE wide. Between them those two fray the coastline into
     something a substituted alloy might actually produce, instead of a circle
     someone drew on.
 
     Returns (per-site probability, [(cx, cy, radius, harmonics)]).
     """
-    n = max(int(ISLAND_COUNT), 0)
     x0, x1, y0, y1 = _sheet_bounds(a_positions)
-    base = ISLAND_RADIUS * min(x1 - x0, y1 - y0)
+    unit = min(x1 - x0, y1 - y0)
+    mid_x, mid_y = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
 
+    # in-plane unit vectors along a and b. Flattening to XY matters for a
+    # tilted VIEW_DIRECTION, where the cell vectors come back out of the
+    # sheet's plane and only their shadow on it is a direction to walk in.
+    def in_plane(v, fallback):
+        flat = Vector((v.x, v.y, 0.0))
+        return flat.normalized() if flat.length > 1e-9 else fallback
+
+    ea = in_plane(cell[0], Vector((1.0, 0.0, 0.0)))
+    eb = in_plane(cell[1], Vector((0.0, 1.0, 0.0)))
+
+    r = max(ISLAND_RADIUS * unit, 1e-3)
     islands = []
-    for _ in range(n):
-        r = max(base * (1.0 + ISLAND_RADIUS_JITTER * (rng.random() * 2.0 - 1.0)),
-                1e-3)
+    for fa, fb in ISLAND_POSITIONS:
+        cx = mid_x + (fa * ea.x + fb * eb.x) * unit
+        cy = mid_y + (fa * ea.y + fb * eb.y) * unit
         harmonics = [(rng.uniform(0.4, 1.0), rng.uniform(0.0, 2.0 * pi), k)
                      for k in (2, 3, 5)]
-        inset = r * ISLAND_INSET
-        lox, hix = x0 + inset, x1 - inset
-        loy, hiy = y0 + inset, y1 - inset
-        if lox > hix:
-            lox = hix = 0.5 * (x0 + x1)
-        if loy > hiy:
-            loy = hiy = 0.5 * (y0 + y1)
-        cx, cy = 0.5 * (lox + hix), 0.5 * (loy + hiy)
-        for _attempt in range(200):
-            cx, cy = rng.uniform(lox, hix), rng.uniform(loy, hiy)
-            if all(hypot(cx - ox, cy - oy) >= (r + orad) * ISLAND_SPACING
-                   for ox, oy, orad, _ in islands):
-                break
         islands.append((cx, cy, r, harmonics))
 
     def blob_radius(island, angle):
-        _, _, r, harmonics = island
+        _, _, rad, harmonics = island
         m = 1.0
         for amp, phase, k in harmonics:
             m += ISLAND_WOBBLE * amp * cos(k * angle + phase) / len(harmonics)
-        return r * max(m, 0.25)
+        return rad * max(m, 0.25)
 
     lo_p = min(max(ISLAND_BACKGROUND, 0.0), 1.0)
     hi_p = min(max(ISLAND_FILL, 0.0), 1.0)
@@ -1399,13 +1439,13 @@ def island_targets(a_positions, rng):
     return targets, islands
 
 
-def site_targets(a_positions, x_metal, rng):
+def site_targets(a_positions, cell, x_metal, rng):
     """
     Target metallic fraction for every A site, plus whatever the composition
     mode wants to report about itself.
     """
     if COMPOSITION_MODE == "islands":
-        targets, islands = island_targets(a_positions, rng)
+        targets, islands = island_targets(a_positions, cell, rng)
         return targets, {"islands": islands}
 
     if COMPOSITION_MODE == "gradient":
@@ -1616,7 +1656,7 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
     col = get_collection(f"CuCrO2_{tag}")
     off = Vector((x_offset, 0.0, 0.0))
 
-    atoms, _, stack_axis = build_supercell(struct)
+    atoms, cell, stack_axis = build_supercell(struct)
 
     a_idx = [i for i, (e, _) in enumerate(atoms) if e == A_SITE_ELEMENT]
     if not a_idx:
@@ -1625,7 +1665,7 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
                          "to one of these.")
     a_pos = [atoms[i][1] for i in a_idx]
 
-    target, info = site_targets(a_pos, x_metal, rng)
+    target, info = site_targets(a_pos, cell, x_metal, rng)
     is_metal = [rng.random() < t for t in target]
     labels, clusters, channel_pairs, spanning, nn = percolation_analysis(a_pos, is_metal)
 
@@ -1681,6 +1721,14 @@ def build_panel(struct, x_metal, panel_index, x_offset, rng):
         a_pos = [atoms[i][1] for i in a_idx]      # rebind after the shift
         print(f"  layer gap: {LAYER_GAP:+.2f} A between "
               f"{len(layer_groups(atoms, stack_axis))} layers")
+    if SHOW_BONDS:
+        kept = drop_vertical([(atoms[i][1], atoms[j][1])
+                              for i, j in bond_pairs], stack_axis)
+        print(f"  chemical bonds: {len(kept)} drawn of {len(bond_pairs)} found")
+        if bond_pairs and not kept:
+            print("    (every bond was filtered out -- with SHOW_VERTICAL_BONDS "
+                  "off, a structure whose only bonds run along the stacking "
+                  "axis draws none at all)")
     if not SHOW_VERTICAL_BONDS:
         print(f"  vertical bonds excluded (within "
               f"{VERTICAL_BOND_ANGLE:.0f} deg of the stacking axis)")
