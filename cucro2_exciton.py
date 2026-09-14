@@ -238,7 +238,7 @@ STRONG_BINDING       = 1.00   # binding strength of the strong ones, 0..1
 WEAK_BINDING         = 0.15   # ... and of the weak ones
 
 # The strength dial drives the whole model at once -- orbit radius, particle
-# size, aura, tail, funnel, brightness and colour -- because at these sizes
+# size, field lines, tail, funnel, brightness and colour -- at these sizes
 # one quantity changing by 30% does not read, but everything loosening and
 # fading together does. Each WEAK_ value below is the far end of the quantity
 # named after it; the value in the exciton model block is the strong end.
@@ -246,9 +246,12 @@ WEAK_PARTICLE_SCALE  = 0.55   # a weakly bound pair's electron and hole are
                               # this fraction of the size, keeping the ratio
                               # between the two
 WEAK_ORBIT_RADIUS    = 6.4    # the pair drifts apart as the binding weakens
-WEAK_AURA_DENSITY    = 0.10   # and the cloud between them thins out
-WEAK_AURA_EMISSION   = 1.2
-WEAK_AURA_MARGIN     = 2.2    # a loose halo rather than a tight bridge
+WEAK_FIELD_LINE_RINGS = 3     # the loose end of the field line bundle: this
+WEAK_FIELD_LINE_AZIMUTHS = 8  # many rings of this many lines each, against
+                              # FIELD_LINE_RINGS x FIELD_LINE_AZIMUTHS in the
+                              # model block. Both counts are rounded after the
+                              # blend, so at WEAK_BINDING = 0.15 a weak pair
+                              # comes out at 4 x 10 = 40 lines, not 3 x 8
 WEAK_TRAIL_LENGTH    = 0.90   # a long wispy tail instead of a short hot one
 WEAK_TRAIL_LEVEL     = 1.0
 WEAK_GLOW_OUTER_SCALE = 2.3   # a bigger, fainter halo on each particle
@@ -283,11 +286,6 @@ STRONG_SPREAD        = 0.85   # how far out into its island a strong exciton
 WEAK_CLEARANCE       = 1.25   # weak excitons keep this many island radii
                               # away from every island, so the two
                               # populations do not mix
-AURA_VOLUME_LIMIT    = 6      # only the this many strongest excitons get a
-                              # volumetric aura; the rest make do with the
-                              # halo around each particle. Volumes are the
-                              # expensive part of the render, and the faint
-                              # distant ones do not repay it.
 
 
 # ============================================================================
@@ -412,12 +410,15 @@ FUNNEL_POOL_FALLOFF  = 2.2    # >1 pulls the pool in tighter around the centre
 FUNNEL_POOL_STEPS    = 32
 
 # --- field lines (optional) -------------------------------------------------
-SHOW_FIELD_LINES     = False  # the full dipole streamline bundle. Off by
-                              # default now that the tail and the aura carry
-                              # the picture; turn it on for the
-                              # physics-diagram version.
-FIELD_LINE_RINGS     = 7      # launch angles (rings of lines)
-FIELD_LINE_AZIMUTHS  = 18     # lines around the axis per ring
+SHOW_FIELD_LINES     = True   # the dipole streamline bundle binding the
+                              # pair. How many lines each exciton gets follows
+                              # its binding strength: the counts here are the
+                              # strong end and WEAK_FIELD_LINE_* the other, so
+                              # a loosely bound pair is held by visibly fewer.
+FIELD_LINE_RINGS     = 7      # launch angles (rings of lines), for a pair at
+FIELD_LINE_AZIMUTHS  = 18     # full binding: 7 x 18 = 126 lines, against 4 x
+                              # 10 = 40 for the weak population at
+                              # WEAK_BINDING 0.15
 FIELD_LINE_AXIS_BIAS = 2.6    # >1 pushes launch angles toward the axis, which
                               # is what crowds the lines into the middle.
                               # 1.0 = even spread, 4.0 = very dense cord.
@@ -431,7 +432,11 @@ MID_GLOW_BOOST       = 2.2    # extra brightness at the midpoint of each line
                               # (this is what makes the central cord white-hot)
 MID_GLOW_WIDTH       = 0.30   # 0..1, how much of the line the boost covers
 
-INTEGRATION_STEP     = 0.045  # RK4 step length; smaller = smoother, slower
+INTEGRATION_STEP     = 0.045  # RK4 step length, before EXCITON_SCALE. It
+                              # scales with the exciton, so a larger pair
+                              # costs no more steps per line than a small one
+                              # -- otherwise tracing slows by the cube of the
+                              # scale for no extra detail.
 MAX_STEPS            = 20000
 FIELD_LINE_TAPER     = 0.12   # fraction of each end that tapers to a point
 
@@ -457,29 +462,9 @@ GLOW_ALPHA           = 0.60   # peak alpha of the halo, reached just outside
 GLOW_FALLOFF         = 2.6    # >1 fades faster toward the halo's outer edge
 GLOW_EMISSION        = 1.8
 
-# --- aura enclosing the whole exciton (a single emissive volume) -----------
-SHOW_AURA            = True
-AURA_MARGIN          = 1.2        # how far the aura reaches past the two
-                                  # particles. The aura is a spindle sitting
-                                  # directly between the hole and the
-                                  # electron, so this is what makes it a tight
-                                  # bridge of light or a loose halo.
-AURA_DENSITY         = 0.45       # density at the core of the aura. This
-                                  # and AURA_EMISSION multiply; too much
-                                  # density hazes over the particles instead
-                                  # of glowing around them.
-AURA_FALLOFF         = 2.4        # >1 = tighter, faster fade to nothing
-AURA_EMISSION        = 2.5
-AURA_RESOLUTION      = (64, 32)   # (azimuthal, polar) segments of the shell
-                                  # that bounds the volume
-
+# --- mesh resolution ---------------------------------------------------------
 PARTICLE_SEGMENTS    = 48     # mesh resolution of the electron and the hole
 PARTICLE_RINGS       = 32
-
-
-# ============================================================================
-#  THE SCENE
-# ============================================================================
 
 # --- scene / render ----------------------------------------------------------
 SETUP_SCENE            = True   # camera, lights and render settings
@@ -2238,67 +2223,6 @@ def beam_material(name, attr_name, strength, alpha, facing_falloff=0.0):
     return mat
 
 
-def aura_volume_material(name, hole_color, electron_color, density, falloff,
-                         strength):
-    """
-    Emissive volume whose density falls off from the centre of the aura to its
-    surface, tinted along its length from the hole's colour at the hole end to
-    the electron's at the electron end.
-
-    Why the old version rendered as nothing: it fed the *world-space* distance
-    from the origin straight into a colour ramp. A ramp's Fac is clamped to
-    0..1, and the aura is several Blender units across, so every point more
-    than one unit from the centre came out at density zero. Here the aura mesh
-    is a plain unit sphere and its size lives in the object's scale instead,
-    so Texture Coordinate -> Object hands back a normalised radius that really
-    does run 0 at the core to 1 at the surface. The falloff is then explicit
-    math -- clamp(1 - r) ** AURA_FALLOFF -- instead of a two-stop ramp.
-    """
-    mat = bpy.data.materials.get(name)
-    if mat:
-        return mat
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    nt = mat.node_tree
-    nt.nodes.clear()
-
-    tex = _node(nt, "ShaderNodeTexCoord", -1000, 0)
-    length = _node(nt, "ShaderNodeVectorMath", -800, -80)
-    length.operation = "LENGTH"
-    nt.links.new(tex.outputs["Object"], length.inputs[0])
-
-    inv = _math(nt, "SUBTRACT", -620, -80, value1=1.0, clamp=True)  # 1 - r
-    nt.links.new(length.outputs["Value"], inv.inputs[1])
-    prof = _math(nt, "POWER", -440, -80, value2=max(falloff, 0.01))
-    nt.links.new(inv.outputs["Value"], prof.inputs[0])
-
-    dens = _math(nt, "MULTIPLY", -260, -160, value2=max(density, 0.0))
-    nt.links.new(prof.outputs["Value"], dens.inputs[0])
-    emit = _math(nt, "MULTIPLY", -260, -320, value2=max(strength, 0.0))
-    nt.links.new(prof.outputs["Value"], emit.inputs[0])
-
-    # colour gradient along the spindle: object Z runs -1 at the hole end to
-    # +1 at the electron end, because the object is rotated to put its local
-    # +Z along the hole -> electron direction
-    sep = _node(nt, "ShaderNodeSeparateXYZ", -800, 220)
-    nt.links.new(tex.outputs["Object"], sep.inputs[0])
-    zt = _math(nt, "MULTIPLY_ADD", -620, 220, value2=0.5, value3=0.5,
-               clamp=True)
-    nt.links.new(sep.outputs["Z"], zt.inputs[0])
-    ramp = _two_stop_ramp(nt, -440, 220, hole_color, electron_color)
-    nt.links.new(zt.outputs["Value"], ramp.inputs["Fac"])
-
-    vol = _node(nt, "ShaderNodeVolumePrincipled", 0, 0)
-    _set_in(vol, "Anisotropy", 0.0)
-    _link_in(nt, ramp.outputs["Color"], vol, "Color")
-    _link_in(nt, ramp.outputs["Color"], vol, "Emission Color")
-    _link_in(nt, dens.outputs["Value"], vol, "Density")
-    _link_in(nt, emit.outputs["Value"], vol, "Emission Strength")
-
-    out = _node(nt, "ShaderNodeOutputMaterial", 260, 0)
-    nt.links.new(vol.outputs["Volume"], out.inputs["Volume"])
-    return mat
-
 # ============================================================================
 #  The dipole field, for the optional field lines
 #  Streamlines of the field of two equal and opposite point charges,
@@ -2395,15 +2319,20 @@ def build_field_lines(ex):
     """Trace every field line from this exciton's hole (+) to its electron (-)."""
     r_electron, r_hole = ex.electron(), ex.centre
     axis_to_electron = (r_electron - r_hole).normalized()
-    dirs = launch_directions(axis_to_electron, FIELD_LINE_RINGS,
-                             FIELD_LINE_AZIMUTHS, LAUNCH_ANGLE_MIN,
+    dirs = launch_directions(axis_to_electron, ex.field_rings,
+                             ex.field_azimuths, LAUNCH_ANGLE_MIN,
                              LAUNCH_ANGLE_MAX, FIELD_LINE_AXIS_BIAS)
     start_r = ex.hole_radius * 1.02
     stop_r = ex.electron_radius * 1.02
 
+    # the step is a length, so it scales with the pair: without this a pair
+    # drawn three times larger costs three times the steps per line
+    step = INTEGRATION_STEP * ex.scale
+
     lines, failed = [], 0
     for d, _ring_u in dirs:
-        pts = trace_field_line(r_hole + d * start_r, r_hole, r_electron, stop_r)
+        pts = trace_field_line(r_hole + d * start_r, r_hole, r_electron,
+                               stop_r, step=step)
         if pts and len(pts) > 3:
             lines.append(pts)
         else:
@@ -2515,8 +2444,7 @@ class Exciton:
     invisible against the sheet.
     """
 
-    def __init__(self, centre, strength, scale, normal, phase, direction,
-                 volume_aura=True):
+    def __init__(self, centre, strength, scale, normal, phase, direction):
         t = min(max(strength, 0.0), 1.0)
 
         def blend(weak, strong):
@@ -2528,7 +2456,6 @@ class Exciton:
         self.phase = phase
         self.direction = 1.0 if direction >= 0 else -1.0
         self.scale = scale
-        self.volume_aura = volume_aura
         # materials are shared by every pair of the same strength, so two
         # populations cost two sets rather than one set each
         self.tag = f"{int(round(t * 100)):03d}"
@@ -2541,9 +2468,13 @@ class Exciton:
         self.emission = blend(WEAK_EMISSION_SCALE, 1.0)
         self.fade = (1.0 - t) * WEAK_DESATURATION
 
-        self.aura_density = blend(WEAK_AURA_DENSITY, AURA_DENSITY)
-        self.aura_emission = blend(WEAK_AURA_EMISSION, AURA_EMISSION) * self.emission
-        self.aura_margin = blend(WEAK_AURA_MARGIN, AURA_MARGIN) * scale
+        # how much of the dipole bundle actually gets drawn. Rounded, because
+        # rings and azimuths are counts, and floored at 1 so a pair is never
+        # left with no lines at all
+        self.field_rings = max(int(round(
+            blend(WEAK_FIELD_LINE_RINGS, FIELD_LINE_RINGS))), 1)
+        self.field_azimuths = max(int(round(
+            blend(WEAK_FIELD_LINE_AZIMUTHS, FIELD_LINE_AZIMUTHS))), 1)
 
         self.glow_scale = blend(WEAK_GLOW_OUTER_SCALE, GLOW_OUTER_SCALE)
         self.glow_alpha = blend(WEAK_GLOW_ALPHA, GLOW_ALPHA)
@@ -2634,46 +2565,6 @@ def build_particle_glow(col, ex):
             obj.location = centre
             r = radius * ex.glow_scale
             obj.scale = (r, r, r)
-
-
-def aura_shape(ex):
-    """
-    The aura is a spindle sitting directly between the two particles: a
-    prolate spheroid on the midpoint, its long axis running hole to electron
-    and both ends reaching the aura margin past them.
-    """
-    electron = ex.electron()
-    mid = (electron + ex.centre) * 0.5
-    d = electron - ex.centre
-    axis = d.normalized() if d.length > 1e-9 else Vector((0.0, 0.0, 1.0))
-    biggest = max(ex.electron_radius, ex.hole_radius)
-    return mid, axis, d.length * 0.5 + biggest + ex.aura_margin, biggest + ex.aura_margin
-
-
-def build_aura(col, ex):
-    """
-    A single emissive volume between the particles: densest at the midpoint,
-    falling to nothing at the surface of the spindle.
-
-    The mesh is a plain unit sphere and the shape lives in the object's scale
-    and rotation. That is not cosmetic -- it is what makes the volume shader
-    work, because the shader reads Texture Coordinate -> Object, which is
-    normalised by the object transform and so runs 0 at the core to 1 at the
-    surface however large the aura is.
-    """
-    mid, axis, along, across = aura_shape(ex)
-    mat = aura_volume_material(f"Aura_{ex.tag}", ex.color(HOLE_RIM),
-                               ex.color(ELECTRON_RIM), ex.aura_density,
-                               AURA_FALLOFF, ex.aura_emission)
-    v, f = sphere_mesh_data(1.0, AURA_RESOLUTION[0], AURA_RESOLUTION[1])
-    obj = add_object("Exciton_Aura", v, f, mat, col)
-    if obj is None:
-        return
-    obj.location = mid
-    obj.rotation_mode = "QUATERNION"
-    obj.rotation_quaternion = Vector((0.0, 0.0, 1.0)).rotation_difference(axis)
-    obj.scale = (across, across, along)
-    _enable_volumes()
 
 
 def build_motion_trail(col, ex):
@@ -2841,8 +2732,10 @@ def build_funnel_pool(col, ex, centre, e1, e2, colour):
 def build_exciton(parent, ex, index, drop):
     """Everything one exciton draws, in a collection of its own."""
     col = get_collection(f"Exciton_{index:02d}_s{ex.tag}", parent)
+    lines_drawn = 0
     if SHOW_FIELD_LINES:
-        lines, _ = build_field_lines(ex)
+        lines, _failed = build_field_lines(ex)
+        lines_drawn = len(lines)
         if lines:
             build_field_line_objects(col, ex, lines)
     dashes = build_motion_trail(col, ex) if SHOW_TRAIL else 0
@@ -2851,9 +2744,7 @@ def build_exciton(parent, ex, index, drop):
     build_particles(col, ex)
     if SHOW_PARTICLE_GLOW:
         build_particle_glow(col, ex)
-    if SHOW_AURA and ex.volume_aura:
-        build_aura(col, ex)
-    return dashes
+    return dashes, lines_drawn
 # ============================================================================
 #  Placing the excitons over the sheet
 # ============================================================================
@@ -2890,14 +2781,14 @@ def place_excitons(lattice, rng):
     placed = []
     out = []
 
-    def spec(x, y, strength, volume_aura):
+    def spec(x, y, strength):
         z = plane_z + height + rng.uniform(-jitter, jitter)
         tilt = radians(EXCITON_TILT)
         normal = Vector((rng.uniform(-1.0, 1.0) * sin(tilt),
                          rng.uniform(-1.0, 1.0) * sin(tilt), 1.0))
         return Exciton(Vector((x, y, z)), strength, EXCITON_SCALE, normal,
                        rng.uniform(0.0, 360.0),
-                       1 if rng.random() < 0.5 else -1, volume_aura)
+                       1 if rng.random() < 0.5 else -1)
 
     # --- strong: on the islands ---------------------------------------------
     want_strong = max(int(STRONG_EXCITONS), 0)
@@ -2914,7 +2805,7 @@ def place_excitons(lattice, rng):
                 x, y = cx + d * cos(a), cy + d * sin(a)
             else:
                 x, y = rng.uniform(x0, x1), rng.uniform(y0, y1)
-            cand = spec(x, y, STRONG_BINDING, True)
+            cand = spec(x, y, STRONG_BINDING)
             if not _too_close(x, y, placed, cand.reach()):
                 trial = (x, y, cand)
                 break
@@ -2931,7 +2822,7 @@ def place_excitons(lattice, rng):
             if any(hypot(x - cx, y - cy) < r * WEAK_CLEARANCE
                    for cx, cy, r, _ in islands):
                 continue
-            cand = spec(x, y, WEAK_BINDING, False)
+            cand = spec(x, y, WEAK_BINDING)
             if not _too_close(x, y, placed, cand.reach()):
                 trial = (x, y, cand)
                 break
@@ -2944,10 +2835,7 @@ def place_excitons(lattice, rng):
         placed.append((x, y, cand.reach()))
         out.append(cand)
 
-    # the volumetric aura is the expensive part, so keep it for the strongest
     out.sort(key=lambda e: -e.strength)
-    for n, ex in enumerate(out):
-        ex.volume_aura = ex.volume_aura and n < max(int(AURA_VOLUME_LIMIT), 0)
     return out
 
 
@@ -2960,26 +2848,31 @@ def build_excitons(lattice, rng):
 
     plane_z = lattice["plane_z"]
     total = 0
+    traced = 0
     for n, ex in enumerate(excitons):
         drop = max(ex.centre.z - plane_z, 0.0)
-        total += build_exciton(parent, ex, n, drop)
+        dashes, lines = build_exciton(parent, ex, n, drop)
+        total += dashes
+        traced += lines
 
     strong = [e for e in excitons if e.strength >= 0.5]
     weak = [e for e in excitons if e.strength < 0.5]
-    volumes = sum(1 for e in excitons if e.volume_aura)
+
     where = "on the islands" if lattice["islands"] else "over the sheet"
     print(f"\n[figure] {len(excitons)} excitons: {len(strong)} strongly bound "
           f"{where}, {len(weak)} weakly bound out on the host sheet")
-    if strong:
-        print(f"  strong: binding {strong[0].strength:.2f}, orbit "
-              f"{strong[0].orbit_radius:.1f} A, particles "
-              f"{strong[0].hole_radius:.1f}/{strong[0].electron_radius:.1f} A")
-    if weak:
-        print(f"  weak:   binding {weak[0].strength:.2f}, orbit "
-              f"{weak[0].orbit_radius:.1f} A, particles "
-              f"{weak[0].hole_radius:.1f}/{weak[0].electron_radius:.1f} A")
-    print(f"  {total} tail dashes, {volumes} volumetric auras "
-          f"(AURA_VOLUME_LIMIT {AURA_VOLUME_LIMIT})")
+    for label, group in (("strong", strong), ("weak  ", weak)):
+        if not group:
+            continue
+        e = group[0]
+        lines = (f"{e.field_rings}x{e.field_azimuths} = "
+                 f"{e.field_rings * e.field_azimuths} field lines"
+                 if SHOW_FIELD_LINES else "field lines off")
+        print(f"  {label}: binding {e.strength:.2f}, orbit "
+              f"{e.orbit_radius:.1f} A, particles "
+              f"{e.hole_radius:.1f}/{e.electron_radius:.1f} A, {lines}")
+    print(f"  {total} tail dashes"
+          + (f", {traced} field lines traced" if SHOW_FIELD_LINES else ""))
     print(f"  floating {excitons[0].centre.z - lattice['plane_z']:.1f} A over "
           f"the Cu plane, in a gap of {lattice['layer_gap']:.1f} A")
     return excitons
@@ -3288,25 +3181,6 @@ def setup_camera(scene, points):
     return cam
 
 
-def _enable_volumes():
-    """Make sure the render engine will actually show the volumetric aura."""
-    scene = bpy.context.scene
-    try:
-        ev = scene.eevee
-        for attr, val in (("use_volumetric_lights", True),
-                          ("volumetric_tile_size", "2"),
-                          ("volumetric_samples", 128),
-                          ("volumetric_start", 0.05),
-                          ("volumetric_end", 1000.0)):
-            if hasattr(ev, attr):
-                try:
-                    setattr(ev, attr, val)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-
 def setup_compositor(scene):
     """
     Glare for the bloom, and on a transparent film a second pass that folds
@@ -3507,9 +3381,6 @@ def main():
         print(f"[figure] engine {engine}, background {described}, camera "
               f"{'orthographic' if ORTHOGRAPHIC else f'{CAMERA_LENS:.0f} mm'} "
               f"at {CAMERA_ELEVATION:.0f} deg above the sheet")
-    if excitons and SHOW_AURA:
-        print("[figure] the auras are volumes: use Rendered shading, not "
-              "Material Preview, to see them.")
 
     if RENDER_NOW:
         if not OUTPUT_PATH:

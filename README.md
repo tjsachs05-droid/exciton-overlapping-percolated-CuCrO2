@@ -5,8 +5,8 @@ Excitons over a percolating CuCrO2 sheet, drawn in Blender as one figure:
 
 The lattice is a Cu/Pd plane under a CrO2 slab, with the A-site substitution
 laid out as large metallic islands on an otherwise gold host sheet. Over it
-float excitons — an electron orbiting a hole, with a dashed motion tail and a
-funnel of light dropping to the plane below. Strongly bound ones gather on the
+float excitons — an electron orbiting a hole, bound by dipole field lines,
+with a dashed motion tail and a funnel of light dropping to the plane below. Strongly bound ones gather on the
 islands; weakly bound ones are scattered out over the host sheet, smaller and
 fainter.
 
@@ -19,9 +19,6 @@ electron going round it, and pale cyan tail dashes.
 Blender → Scripting → Open → edit the `USER PARAMETERS` block at the top →
 Alt+P. It builds the scene, camera, lights and render settings, so `F12`
 renders straight away.
-
-The auras are volumes, so the viewport has to be in **Rendered** shading to
-see them — Material Preview does not draw volumes.
 
 ## Why one file
 
@@ -53,7 +50,8 @@ than by eye. The exciton pass always comes out on a transparent film.
 | `WEAK_CLEARANCE` | how far weak ones stay clear of every island |
 
 The binding strength drives the whole model at once — orbit radius, particle
-size, aura, tail, funnel, brightness and colour — because at these sizes one
+size, field lines, tail, funnel, brightness and colour — because at these
+sizes one
 quantity changing by 30% does not read, but everything loosening and fading
 together does. Each `WEAK_` parameter is the far end of the quantity named
 after it, and the value in the exciton model block is the strong end.
@@ -61,8 +59,15 @@ after it, and the value in the exciton model block is the strong end.
 Weak pairs get smaller particles through `WEAK_PARTICLE_SCALE`, which keeps
 the electron/hole size ratio while shrinking both.
 
-`AURA_VOLUME_LIMIT` caps how many excitons get a volumetric aura. Volumes are
-the expensive part of the render and the faint distant ones do not repay it.
+The field lines are the clearest reading of binding strength. `SHOW_FIELD_LINES`
+turns the bundle on; a pair at full binding is held by `FIELD_LINE_RINGS` x
+`FIELD_LINE_AZIMUTHS` streamlines and one at zero binding by
+`WEAK_FIELD_LINE_RINGS` x `WEAK_FIELD_LINE_AZIMUTHS`. Both counts blend with
+the strength like everything else and are then rounded, so at the defaults the
+strong pairs carry 7 x 18 = 126 lines and the weak ones, sitting at
+`WEAK_BINDING` 0.15 rather than 0, come out at 4 x 10 = 40. They are real
+streamlines of the dipole field, not decorative arcs, integrated with RK4 from
+the hole to the electron.
 
 ## Other knobs worth knowing
 
