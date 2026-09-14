@@ -72,14 +72,28 @@ the hole to the electron.
 ## Other knobs worth knowing
 
 * `COMPOSITION_MODE` — `"islands"` (the default), `"gradient"`, or
-  `"uniform"`. Islands are blobs with ragged coasts rather than discs:
-  `ISLAND_COUNT`, `ISLAND_RADIUS`, `ISLAND_WOBBLE`, `ISLAND_EDGE`.
+  `"uniform"`. Islands are blobs with ragged coasts rather than discs
+  (`ISLAND_WOBBLE`, `ISLAND_EDGE`), and you place them by hand: one island per
+  entry in `ISLAND_POSITIONS`, all of them `ISLAND_RADIUS` across. An entry is
+  `(a, b)` — how far to step from the centre of the sheet along the lattice's
+  own **a** and **b** directions, the two edges of the parallelogram the sheet
+  is built on rather than the screen axes. Both are in the same unit as
+  `ISLAND_RADIUS`, fractions of the sheet's shorter side, so whether two
+  islands clear each other is arithmetic you can do in the parameter block.
+  For the default `VIEW_DIRECTION` `"001"`, **a** runs straight right across
+  the screen and **b** up and to the left at 120°.
 * `CRO2_SLABS` / `N_A_PLANES` / `LAYER_GAP` — how many CrO2 slabs sit around
   the A-plane and how far apart they are pulled. Bonds and the percolation
   analysis are computed on the true geometry first, so the gap stretches the
   vertical Cu-O struts rather than breaking them.
-* `SHOW_VERTICAL_BONDS` — off by default, which drops those struts and leaves
-  the CrO6 octahedral network in the slab and the channel network in the plane.
+* `SHOW_BONDS` / `SHOW_VERTICAL_BONDS` — bonds are on, and the vertical filter
+  is off by default, which drops the struts and leaves the CrO6 octahedral
+  network in the slab and the channel network in the plane. In a delafossite
+  the Cu-O bonds are the linear O-Cu-O dumbbells along the stacking axis, so
+  they are exactly what the vertical filter removes; what you see is the Cr-O
+  network. Bond cutoffs are covalent radii in true Angstrom and scale with
+  `LATTICE_SCALE`, so changing that exaggeration does not change which atoms
+  count as bonded.
 * `BACKGROUND_MODE` — `"gradient"`, `"flat"` or `"transparent"`. The backdrop
   is an emissive quad behind the scene with the gradient in its vertex
   colours, not a world shader and not a composited image: a world gradient has
