@@ -69,6 +69,29 @@ from mathutils import Vector, Matrix
 #  USER PARAMETERS
 # ============================================================================
 
+# --- how tightly the pair is bound ------------------------------------------
+# One dial for the whole model. Everything written below describes a STRONGLY
+# bound exciton -- compact, hot, saturated. BINDING_STRENGTH blends each of the
+# quantities listed in the WEAK_ block toward a loose, faint, washed-out one,
+# so 1.0 is a tightly bound pair and 0.0 is a barely bound one. It drives
+# several things at once on purpose: at these sizes a single quantity changing
+# by 30% does not read, but the orbit, the aura, the tail and the colour all
+# moving together do.
+BINDING_STRENGTH     = 1.0
+
+WEAK_ORBIT_RADIUS    = 6.4    # the pair drifts apart as the binding weakens
+WEAK_AURA_DENSITY    = 0.10   # and the cloud between them thins out
+WEAK_AURA_EMISSION   = 1.2
+WEAK_AURA_MARGIN     = 2.2    # a loose halo rather than a tight bridge
+WEAK_TRAIL_LENGTH    = 0.90   # a long wispy tail instead of a short hot one
+WEAK_TRAIL_LEVEL     = 1.0
+WEAK_GLOW_OUTER_SCALE = 2.3   # a bigger, fainter halo on each particle
+WEAK_GLOW_ALPHA      = 0.26
+WEAK_FUNNEL_LEVEL    = 0.35   # a dimmer funnel down to the sheet
+WEAK_EMISSION_SCALE  = 0.65   # everything dims
+WEAK_DESATURATION    = 0.55   # ... and washes toward grey, so weakly bound
+                              # pairs recede into the background
+
 # --- the pair: an electron in orbit around a hole ---------------------------
 CENTER           = (0.0, 0.0, 0.0)   # the hole sits here
 ORBIT_RADIUS     = 3.6        # how far the electron orbits from the hole
@@ -102,34 +125,80 @@ HOLE_EMISSION     = 1.3        # these much past ~2.5 and the whole sphere
                                # to stay inside the displayable range.
 
 # --- the motion tail --------------------------------------------------------
-# The tail is a BAND, not a line: several concentric strands lying flat in the
-# orbit plane, like the rings of Saturn, sweeping round behind the electron
-# and fading out as they go.
+# The tail is a DASHED band: several concentric strands lying flat in the orbit
+# plane, like the rings of Saturn, each one solid where it leaves the electron
+# and then breaking into dashes that shorten and space further apart behind it
+# until they run out altogether.
 SHOW_TRAIL           = True
-TRAIL_STRANDS        = 5      # concentric strands making up the band
-TRAIL_WIDTH          = 0.95   # width of the whole band, centred on the orbit.
-                              # Spread across the strands, so wider bands with
-                              # few strands read as separate rings and with
-                              # many read as one ribbon.
-TRAIL_STRAND_RADIUS  = 0.045  # thickness of a single strand at the electron
-TRAIL_LENGTH         = 0.50   # fraction of the loop the band trails back over
-TRAIL_FALLOFF        = 1.6    # >1 fades the tail out faster
+TRAIL_STRANDS        = 5      # concentric strands making up the band. 1 gives
+                              # a single dashed line instead of a band.
+TRAIL_WIDTH          = 0.95   # width of the whole band, centred on the orbit
+TRAIL_STRAND_RADIUS  = 0.055  # thickness of a strand where it meets the
+                              # electron
+TRAIL_LENGTH         = 0.50   # fraction of the loop the tail reaches back over
+TRAIL_FALLOFF        = 1.6    # >1 dims the tail faster along its length
+TRAIL_TAIL_WIDTH     = 0.30   # thickness at the far end, as a fraction of
+                              # TRAIL_STRAND_RADIUS
 TRAIL_SHEAR          = 0.35   # outer strands trail this much longer than
                               # inner ones, so the tail feathers out instead
                               # of ending square
 TRAIL_EDGE_FADE      = 0.55   # how much dimmer the outermost strands are than
                               # the middle one: 0 = all equal, 1 = edges dark
-TRAIL_LEVEL          = 2.4    # brightness where the band meets the electron
-TRAIL_RING_LEVEL     = 0.30   # brightness of the rest of the rings -- the arc
-                              # the electron has yet to travel. 0 cuts the
-                              # circles short and leaves only the tail.
-TRAIL_RING_WIDTH     = 0.35   # thickness of that faint part, as a fraction of
-                              # TRAIL_STRAND_RADIUS
-TRAIL_COLOR          = "#8FE4FF"   # pale cyan rings, as in Reference 1
+TRAIL_LEVEL          = 2.6    # brightness where the band meets the electron
+TRAIL_END_LEVEL      = 0.45   # brightness of the last dashes before they go
+
+# How the dashes break up going backwards. The dash length and the gap are
+# set separately rather than as a duty cycle of one period: tie them together
+# and the growing period drags the early dashes longer before the falling duty
+# gets on top of it, so the tail briefly strengthens before it fades. Set
+# apart, each one only ever moves the way it should.
+TRAIL_SOLID          = 0.18   # fraction of the tail nearest the electron that
+                              # stays unbroken before the dashes start
+TRAIL_DASH_LENGTH    = 0.026  # the first dash, as a fraction of the whole loop
+TRAIL_DASH_GAP       = 0.008  # the first gap
+TRAIL_DASH_FALLOFF   = 1.2    # >1 shrinks the dashes away faster
+TRAIL_DASH_GROWTH    = 5.0    # the gap opens to this multiple by the end,
+                              # which is what makes the dashes less frequent
+TRAIL_DASH_MIN       = 0.12   # a dash shorter than this fraction of
+                              # TRAIL_DASH_LENGTH is where the tail ends
+TRAIL_DASH_TAPER     = 0.32   # taper on each dash, so they are lens shaped
+                              # rather than blunt cylinders
+
+TRAIL_COLOR          = "#8FE4FF"   # pale cyan, as in Reference 1
 TRAIL_HEAD_COLOR     = ""     # "" = the electron's own highlight colour
 TRAIL_EMISSION       = 2.0
-TRAIL_RESOLUTION     = 320    # points around each strand
+TRAIL_RESOLUTION     = 320    # points per loop, sampled per dash
 TRAIL_SEGMENTS       = 6      # cross-section resolution of a strand
+
+# --- the light funnel down to the sheet -------------------------------------
+# Borrowed from Reference 1: a cone of light dropping from the exciton to the
+# layer below it, with a pool of light where it lands. It is what ties the
+# exciton to the lattice rather than leaving it floating over the top.
+SHOW_FUNNEL          = True
+FUNNEL_DIRECTION     = (0.0, 0.0, -1.0)  # which way the funnel drops
+FUNNEL_DROP          = 7.5    # how far down it reaches
+FUNNEL_TOP_RADIUS    = 0.55   # radius where it leaves the exciton
+FUNNEL_BOTTOM_RADIUS = 4.2    # radius where it lands
+FUNNEL_FLARE         = 2.2    # >1 keeps it narrow then flares near the
+                              # bottom, which is the trumpet shape rather
+                              # than a plain cone
+FUNNEL_TOP_LEVEL     = 1.6    # brightness at the exciton end
+FUNNEL_BOTTOM_LEVEL  = 0.5    # brightness where it lands
+FUNNEL_LEVEL         = 1.0    # overall multiplier, driven by the binding
+                              # strength
+FUNNEL_ALPHA         = 0.5
+FUNNEL_FACING_FALLOFF = 1.6   # fades the cone out at its own silhouette, so
+                              # it reads as a beam instead of a solid shell
+FUNNEL_COLOR         = ""     # "" = the hole's highlight colour
+FUNNEL_RINGS         = 40     # steps down the funnel
+FUNNEL_SEGMENTS      = 56     # steps around it
+
+SHOW_FUNNEL_POOL     = True   # the disc of light where the funnel lands
+FUNNEL_POOL_RADIUS   = 5.0
+FUNNEL_POOL_LEVEL    = 1.1
+FUNNEL_POOL_ALPHA    = 0.55
+FUNNEL_POOL_FALLOFF  = 2.2    # >1 pulls the pool in tighter around the centre
+FUNNEL_POOL_STEPS    = 32
 
 # --- field lines (optional) -------------------------------------------------
 SHOW_FIELD_LINES     = False  # the full dipole streamline bundle. Off by
@@ -167,7 +236,11 @@ PARTICLE_RIM_BOOST   = 1.25   # how much the rim brightens the edge
 
 # --- glow around each particle (one smooth gradient, no shells) ------------
 SHOW_PARTICLE_GLOW   = True
-GLOW_OUTER_SCALE     = 2.4    # halo radius / particle radius
+GLOW_OUTER_SCALE     = 1.6    # halo radius / particle radius. Kept tight: a
+                              # big soft halo swallows the particle it is
+                              # meant to be lighting, and where two of them
+                              # overlap the middle washes out to white. Let
+                              # the compositor bloom do the soft work.
 GLOW_ALPHA           = 0.60   # peak alpha of the halo, reached just outside
                               # the particle's edge
 GLOW_FALLOFF         = 2.6    # >1 fades faster toward the halo's outer edge
@@ -180,7 +253,7 @@ AURA_MARGIN          = 1.2        # how far the aura reaches past the two
                                   # directly between the hole and the
                                   # electron, so this is what makes it a tight
                                   # bridge of light or a loose halo.
-AURA_DENSITY         = 0.35       # density at the core of the aura. This
+AURA_DENSITY         = 0.45       # density at the core of the aura. This
                                   # and AURA_EMISSION multiply; too much
                                   # density hazes over the particles instead
                                   # of glowing around them.
@@ -259,6 +332,79 @@ def hex_to_linear(h):
 
 def mix(c1, c2, t):
     return tuple(a + (b - a) * t for a, b in zip(c1, c2))
+
+
+# ============================================================================
+#  Binding strength
+# ============================================================================
+#  BINDING_STRENGTH blends the model between a tightly bound pair and a barely
+#  bound one. Each entry below names a parameter and the WEAK_ parameter that
+#  holds its value at zero binding; the value written in USER PARAMETERS is
+#  the strong end.
+# ============================================================================
+
+_STRENGTH_DRIVEN = {
+    "ORBIT_RADIUS": "WEAK_ORBIT_RADIUS",
+    "AURA_DENSITY": "WEAK_AURA_DENSITY",
+    "AURA_EMISSION": "WEAK_AURA_EMISSION",
+    "AURA_MARGIN": "WEAK_AURA_MARGIN",
+    "TRAIL_LENGTH": "WEAK_TRAIL_LENGTH",
+    "TRAIL_LEVEL": "WEAK_TRAIL_LEVEL",
+    "GLOW_OUTER_SCALE": "WEAK_GLOW_OUTER_SCALE",
+    "GLOW_ALPHA": "WEAK_GLOW_ALPHA",
+    "FUNNEL_LEVEL": "WEAK_FUNNEL_LEVEL",
+}
+
+# emission strengths are scaled rather than replaced, so the balance between
+# them survives
+_STRENGTH_SCALED = ("ELECTRON_EMISSION", "HOLE_EMISSION", "TRAIL_EMISSION",
+                    "GLOW_EMISSION", "FUNNEL_POOL_LEVEL")
+
+_STRONG_REFERENCE = {}
+
+
+def binding():
+    """The binding strength, clamped to 0..1."""
+    return min(max(BINDING_STRENGTH, 0.0), 1.0)
+
+
+def apply_binding_strength():
+    """
+    Rewrite the strength-driven parameters for the current BINDING_STRENGTH.
+
+    The first call records the values as written -- the strong end -- so that
+    calling it again re-blends from those rather than from whatever the last
+    call left behind.
+    """
+    g = globals()
+    if not _STRONG_REFERENCE:
+        for name in list(_STRENGTH_DRIVEN) + list(_STRENGTH_SCALED):
+            _STRONG_REFERENCE[name] = g[name]
+
+    t = binding()
+    for name, weak_name in _STRENGTH_DRIVEN.items():
+        weak = g[weak_name]
+        g[name] = weak + (_STRONG_REFERENCE[name] - weak) * t
+    scale = WEAK_EMISSION_SCALE + (1.0 - WEAK_EMISSION_SCALE) * t
+    for name in _STRENGTH_SCALED:
+        g[name] = _STRONG_REFERENCE[name] * scale
+    return t
+
+
+def pair_color(hex_string):
+    """
+    A colour from the palette, washed toward grey as the binding weakens.
+
+    Desaturation is what actually makes a loosely bound pair recede: dimming
+    alone just makes a small dark version of the same thing, while a washed
+    out one reads as faint even next to a bright neighbour.
+    """
+    c = hex_to_linear(hex_string)
+    fade = (1.0 - binding()) * WEAK_DESATURATION
+    if fade <= 1e-6:
+        return c
+    grey = sum(c) / 3.0
+    return mix(c, (grey, grey, grey), fade)
 
 
 # ============================================================================
@@ -794,6 +940,55 @@ def halo_material(name, inner_color, outer_color, strength, alpha, falloff):
     return mat
 
 
+def beam_material(name, attr_name, strength, alpha, facing_falloff=0.0):
+    """
+    Emission from a vertex colour, faded out by that colour's own alpha.
+
+    With `facing_falloff` above zero the alpha is also multiplied by
+    |dot(N, I)|, so the surface disappears at its own silhouette. That is what
+    turns the funnel from a visible cone-shaped shell into something that
+    reads as a shaft of light: no outline anywhere, brightest where you are
+    looking straight through the most of it.
+    """
+    mat = bpy.data.materials.get(name)
+    if mat:
+        return mat
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+
+    attr = _node(nt, "ShaderNodeAttribute", -700, 0)
+    attr.attribute_name = attr_name
+
+    a = _math(nt, "MULTIPLY", -300, -140, value2=max(min(alpha, 1.0), 0.0),
+              clamp=True)
+    nt.links.new(attr.outputs["Alpha"], a.inputs[0])
+    if facing_falloff > 0.0:
+        _, facing = _facing(nt, -900, -340)
+        prof = _math(nt, "POWER", -480, -340, value2=facing_falloff)
+        nt.links.new(facing.outputs["Value"], prof.inputs[0])
+        shaped = _math(nt, "MULTIPLY", -120, -140, clamp=True)
+        nt.links.new(a.outputs["Value"], shaped.inputs[0])
+        nt.links.new(prof.outputs["Value"], shaped.inputs[1])
+        a = shaped
+
+    emis = _node(nt, "ShaderNodeEmission", -120, 120)
+    emis.inputs["Strength"].default_value = strength
+    nt.links.new(attr.outputs["Color"], emis.inputs["Color"])
+    trans = _node(nt, "ShaderNodeBsdfTransparent", -120, -20)
+    mixer = _node(nt, "ShaderNodeMixShader", 120, 60)
+    nt.links.new(a.outputs["Value"], mixer.inputs["Fac"])
+    nt.links.new(trans.outputs["BSDF"], mixer.inputs[1])
+    nt.links.new(emis.outputs["Emission"], mixer.inputs[2])
+    out = _node(nt, "ShaderNodeOutputMaterial", 320, 60)
+    nt.links.new(mixer.outputs["Shader"], out.inputs["Surface"])
+
+    # both walls of the funnel should show through each other
+    _set_blend(mat, min(alpha, 0.999), single_layer=False)
+    return mat
+
+
 def aura_volume_material(name, hole_color, electron_color, density, falloff,
                          strength):
     """
@@ -873,7 +1068,10 @@ def add_object(name, verts, faces, mat, collection, colors=None,
                                              type="FLOAT_COLOR",
                                              domain="POINT")
             for i, c in enumerate(colors):
-                attr.data[i].color = (c[0], c[1], c[2], 1.0)
+                # a fourth component is per-vertex alpha, which is what the
+                # funnel and its pool fade themselves out with
+                attr.data[i].color = (c[0], c[1], c[2],
+                                      c[3] if len(c) > 3 else 1.0)
         except Exception as e:
             print(f"[exciton] could not write colour attribute: {e}")
     obj = bpy.data.objects.new(name, mesh)
@@ -892,8 +1090,8 @@ def build_particles(col, r_electron, r_hole):
              ELECTRON_RIM, ELECTRON_EMISSION),
             ("Hole", r_hole, HOLE_RADIUS, HOLE_COLOR, HOLE_RIM,
              HOLE_EMISSION)):
-        mat = particle_material(label, hex_to_linear(core_hex),
-                                hex_to_linear(rim_hex), strength)
+        mat = particle_material(label, pair_color(core_hex),
+                                pair_color(rim_hex), strength)
         v, f = sphere_mesh_data(radius, SPHERE_SEGMENTS, SPHERE_RINGS)
         obj = add_object(f"Exciton_{label}", v, f, mat, col)
         if obj:
@@ -913,8 +1111,8 @@ def build_particle_glow(col, r_electron, r_hole):
             ("Electron", r_electron, ELECTRON_RADIUS, ELECTRON_COLOR,
              ELECTRON_RIM),
             ("Hole", r_hole, HOLE_RADIUS, HOLE_COLOR, HOLE_RIM)):
-        mat = halo_material(f"{label}_Halo", hex_to_linear(rim_hex),
-                            hex_to_linear(core_hex), GLOW_EMISSION,
+        mat = halo_material(f"{label}_Halo", pair_color(rim_hex),
+                            pair_color(core_hex), GLOW_EMISSION,
                             GLOW_ALPHA, GLOW_FALLOFF)
         v, f = sphere_mesh_data(1.0, 48, 32)
         obj = add_object(f"Exciton_{label}_Halo", v, f, mat, col)
@@ -1035,8 +1233,8 @@ def build_aura(col, r_electron, r_hole):
     which is normalised by the object transform and so runs 0 at the core to 1
     at the surface however large the aura is.
     """
-    e_col = hex_to_linear(ELECTRON_RIM)
-    h_col = hex_to_linear(HOLE_RIM)
+    e_col = pair_color(ELECTRON_RIM)
+    h_col = pair_color(HOLE_RIM)
     mid, axis, along, across = aura_shape(r_electron, r_hole)
     segs, rings = AURA_RESOLUTION
 
@@ -1053,27 +1251,79 @@ def build_aura(col, r_electron, r_hole):
     _enable_volumes()
 
 
+def dash_spans(length):
+    """
+    Where the tail is drawn and where it is not, as (start, end) pairs measured
+    in fractions of the loop behind the electron.
+
+    The first span is unbroken: the tail leaves the electron as a solid
+    stroke. After TRAIL_SOLID it breaks up, and from there the dashes shorten
+    while the gaps between them open out, so they arrive less and less often
+    on the way back. The tail ends where the dash length falls below
+    TRAIL_DASH_MIN -- the point at which it has visibly run out, rather than
+    an arbitrary cut.
+    """
+    length = min(max(length, 1e-3), 1.0)
+    solid_end = min(max(TRAIL_SOLID, 0.0), 1.0) * length
+    spans = []
+    if solid_end > 1e-6:
+        spans.append((0.0, solid_end))
+
+    if TRAIL_DASH_LENGTH <= 1e-6:
+        return spans              # no dashes wanted: the solid head is the tail
+    dash0 = TRAIL_DASH_LENGTH
+    gap0 = max(TRAIL_DASH_GAP, 1e-5)
+    dashed = max(length - solid_end, 1e-9)
+    floor = TRAIL_DASH_MIN * dash0
+    s = solid_end
+    for _ in range(4000):                      # a bound, not a limit
+        if s >= length:
+            break
+        u = (s - solid_end) / dashed           # 0 where the dashes start, 1 at the end
+        dash = dash0 * max(1.0 - u, 0.0) ** max(TRAIL_DASH_FALLOFF, 0.01)
+        if dash <= floor:
+            break                              # the dashes have shrunk to nothing
+        gap = gap0 * (1.0 + (TRAIL_DASH_GROWTH - 1.0) * u)
+        spans.append((s, min(s + dash, length)))
+        s += dash + gap
+    return spans
+
+
+def arc_points(centre, normal, radius, start, end, n):
+    """Points along the orbit between two positions behind the electron."""
+    e1, e2 = orbit_frame(normal)
+    phase = math.radians(ORBIT_PHASE)
+    sweep = -2.0 * pi * (1.0 if ORBIT_DIRECTION >= 0 else -1.0)
+    pts = []
+    for i in range(n + 1):
+        behind = start + (end - start) * (i / n)
+        th = phase + sweep * behind
+        pts.append(centre + (e1 * cos(th) + e2 * sin(th)) * radius)
+    return pts
+
+
 def build_motion_trail(col, centre, normal):
     """
     The motion tail: a band of concentric strands lying flat in the orbit
-    plane -- the rings of Saturn -- that swell and brighten into the electron
-    and fade away behind it.
+    plane, each one solid where it leaves the electron and then breaking into
+    dashes that shorten and space out behind it until they run out.
 
-    Each strand is one tube whose thickness and colour both follow how far
-    behind the electron the point is. Two things keep the band from reading as
-    a flat stencil: the strands further out trail TRAIL_SHEAR longer than the
-    inner ones, so the tail feathers rather than ending on a straight edge,
-    and the outer strands are dimmer than the middle by TRAIL_EDGE_FADE, so
-    the band has a bright spine.
+    Three things fade together along a strand, which is what sells it as
+    motion rather than as a drawn dotted line: the dashes get shorter and
+    further apart, each dash gets thinner, and the colour cools from the
+    electron's own highlight to the dim tail colour. Across the band, the
+    outer strands trail TRAIL_SHEAR longer than the inner ones so the tail
+    feathers instead of ending on a straight edge, and they are dimmer by
+    TRAIL_EDGE_FADE so the band keeps a bright spine.
     """
-    n = max(int(TRAIL_RESOLUTION), 24)
     strands = max(int(TRAIL_STRANDS), 1)
-    head = hex_to_linear(TRAIL_HEAD_COLOR or ELECTRON_RIM)
-    rings = hex_to_linear(TRAIL_COLOR)
+    head = pair_color(TRAIL_HEAD_COLOR or ELECTRON_RIM)
+    tail = pair_color(TRAIL_COLOR)
     falloff = max(TRAIL_FALLOFF, 0.01)
-    ring_only = TRAIL_RING_LEVEL <= 0.01
+    resolution = max(int(TRAIL_RESOLUTION), 24)
 
     V, F, C = [], [], []
+    dashes = 0
     for j in range(strands):
         # -1 at the inner edge of the band, +1 at the outer edge
         u = 0.0 if strands == 1 else (2.0 * j / (strands - 1) - 1.0)
@@ -1083,42 +1333,135 @@ def build_motion_trail(col, centre, normal):
         level = max(1.0 - TRAIL_EDGE_FADE * abs(u), 0.0)
         length = min(max(TRAIL_LENGTH * (1.0 + TRAIL_SHEAR * u), 1e-3), 1.0)
         hot = tuple(v * TRAIL_LEVEL * level for v in head)
-        faint = tuple(v * TRAIL_RING_LEVEL * level for v in rings)
+        cold = tuple(v * TRAIL_END_LEVEL * level for v in tail)
 
-        pts = orbit_points(centre, normal, n, radius)
-        radii, colors = [], []
-        for i in range(n + 1):
-            behind = i / n                   # 0 at the electron, 1 back to it
-            w = max(0.0, 1.0 - behind / length) ** falloff
-            radii.append(TRAIL_STRAND_RADIUS *
-                         (TRAIL_RING_WIDTH + (1.0 - TRAIL_RING_WIDTH) * w))
-            colors.append(mix(faint, hot, w))
+        for start, end in dash_spans(length):
+            steps = max(int(resolution * (end - start)), 3)
+            pts = arc_points(centre, normal, radius, start, end, steps)
+            radii, colors = [], []
+            for i in range(steps + 1):
+                behind = start + (end - start) * (i / steps)
+                w = max(0.0, 1.0 - behind / length) ** falloff
+                radii.append(TRAIL_STRAND_RADIUS *
+                             (TRAIL_TAIL_WIDTH + (1.0 - TRAIL_TAIL_WIDTH) * w))
+                colors.append(mix(cold, hot, w))
 
-        # With the rings turned off their colour is black, and black emission
-        # is still opaque geometry -- a dark hairline across the background
-        # rather than nothing at all. Cut each strand short instead, which is
-        # also where the shear shows: the band feathers out.
-        taper = 0.0
-        if ring_only:
-            keep = min(len(pts), int(length * n) + 2)
-            pts, radii, colors = pts[:keep], radii[:keep], colors[:keep]
-            taper = 0.06
-
-        v, f, _ = tube_from_polyline(pts, radii, TRAIL_SEGMENTS, taper=taper)
-        if not v:
-            continue
-        base = len(V)
-        V.extend(v)
-        F.extend(tuple(base + i for i in face) for face in f)
-        for c in colors:
-            C.extend([c] * TRAIL_SEGMENTS)
+            v, f, _ = tube_from_polyline(pts, radii, TRAIL_SEGMENTS,
+                                         taper=TRAIL_DASH_TAPER)
+            if not v:
+                continue
+            base = len(V)
+            V.extend(v)
+            F.extend(tuple(base + i for i in face) for face in f)
+            for c in colors:
+                C.extend([c] * TRAIL_SEGMENTS)
+            dashes += 1
 
     if not V:
-        return
+        return 0
     mat = vertex_color_emission_material("MotionTrail", "TrailColor",
                                          TRAIL_EMISSION)
     add_object("Exciton_MotionTrail", V, F, mat, col, colors=C,
                attr_name="TrailColor")
+    return dashes
+
+
+def build_light_funnel(col, centre):
+    """
+    A cone of light dropping from the exciton to the layer below it, as in
+    Reference 1.
+
+    FUNNEL_FLARE above 1 holds it narrow out of the exciton and opens it near
+    the bottom, which is the trumpet shape rather than a plain cone. Its alpha
+    is written per vertex so it fades along its length, and the material fades
+    it again at its own silhouette -- without that second term the cone has a
+    visible outline and reads as a solid shell instead of a shaft of light.
+    """
+    drop = Vector(FUNNEL_DIRECTION)
+    if drop.length < 1e-9:
+        return None
+    drop = drop.normalized()
+    ref = Vector((1.0, 0.0, 0.0))
+    if abs(drop.dot(ref)) > 0.9:
+        ref = Vector((0.0, 1.0, 0.0))
+    e1 = drop.cross(ref).normalized()
+    e2 = drop.cross(e1).normalized()
+
+    colour = pair_color(FUNNEL_COLOR or HOLE_RIM)
+    rings = max(int(FUNNEL_RINGS), 2)
+    segs = max(int(FUNNEL_SEGMENTS), 6)
+    flare = max(FUNNEL_FLARE, 0.01)
+
+    verts, faces, colors = [], [], []
+    for i in range(rings + 1):
+        t = i / rings                          # 0 at the exciton, 1 at the sheet
+        r = FUNNEL_TOP_RADIUS + (FUNNEL_BOTTOM_RADIUS - FUNNEL_TOP_RADIUS) * t ** flare
+        level = (FUNNEL_TOP_LEVEL +
+                 (FUNNEL_BOTTOM_LEVEL - FUNNEL_TOP_LEVEL) * t) * FUNNEL_LEVEL
+        ring_centre = centre + drop * (FUNNEL_DROP * t)
+        # brightness may run past 1 for the glow; the alpha may not
+        c = (tuple(v * max(level, 0.0) for v in colour)
+             + (min(max(level, 0.0), 1.0),))
+        for k in range(segs):
+            a = 2.0 * pi * k / segs
+            p = ring_centre + (e1 * cos(a) + e2 * sin(a)) * r
+            verts.append((p.x, p.y, p.z))
+            colors.append(c)
+    for i in range(rings):
+        for k in range(segs):
+            k2 = (k + 1) % segs
+            b0, b1 = i * segs, (i + 1) * segs
+            faces.append((b0 + k, b0 + k2, b1 + k2, b1 + k))
+
+    mat = beam_material("Funnel", "FunnelColor", 1.0, FUNNEL_ALPHA,
+                        FUNNEL_FACING_FALLOFF)
+    obj = add_object("Exciton_Funnel", verts, faces, mat, col, colors=colors,
+                     attr_name="FunnelColor")
+
+    if SHOW_FUNNEL_POOL:
+        build_funnel_pool(col, centre + drop * FUNNEL_DROP, e1, e2, colour)
+    return obj
+
+
+def build_funnel_pool(col, centre, e1, e2, colour):
+    """
+    The disc of light where the funnel lands: bright at the middle, fading to
+    nothing at its rim.
+
+    A flat disc is the one place the silhouette trick cannot help -- every
+    point on it faces the camera the same way -- so the falloff is written
+    into the vertex alpha instead.
+    """
+    steps = max(int(FUNNEL_POOL_STEPS), 8)
+    rings = 16
+    verts, faces, colors = [], [], []
+
+    centre_level = FUNNEL_POOL_LEVEL * FUNNEL_LEVEL
+    verts.append((centre.x, centre.y, centre.z))
+    colors.append(tuple(v * centre_level for v in colour) + (FUNNEL_POOL_ALPHA,))
+    for i in range(1, rings + 1):
+        t = i / rings
+        level = centre_level * max(1.0 - t, 0.0) ** max(FUNNEL_POOL_FALLOFF, 0.01)
+        alpha = FUNNEL_POOL_ALPHA * max(1.0 - t, 0.0) ** max(FUNNEL_POOL_FALLOFF, 0.01)
+        c = tuple(v * level for v in colour) + (alpha,)
+        for k in range(steps):
+            a = 2.0 * pi * k / steps
+            p = centre + (e1 * cos(a) + e2 * sin(a)) * (FUNNEL_POOL_RADIUS * t)
+            verts.append((p.x, p.y, p.z))
+            colors.append(c)
+
+    def idx(ring, k):
+        return 1 + (ring - 1) * steps + (k % steps)
+
+    faces.extend((0, idx(1, k), idx(1, k + 1)) for k in range(steps))
+    for i in range(1, rings):
+        for k in range(steps):
+            faces.append((idx(i, k), idx(i + 1, k),
+                          idx(i + 1, k + 1), idx(i, k + 1)))
+
+    mat = beam_material("FunnelPool", "PoolColor", 1.0, 1.0, 0.0)
+    return add_object("Exciton_FunnelPool", verts, faces, mat, col,
+                      colors=colors, attr_name="PoolColor")
 
 
 def _enable_volumes():
@@ -1506,6 +1849,12 @@ def main():
     if CLEAR_SCENE:
         clear_scene()
 
+    t = apply_binding_strength()
+    print(f"[exciton] binding strength {t:.2f} "
+          f"({'strongly' if t >= 0.66 else 'weakly' if t <= 0.33 else 'loosely'}"
+          f" bound): orbit {ORBIT_RADIUS:.2f}, aura density "
+          f"{AURA_DENSITY:.2f}, tail over {TRAIL_LENGTH * 100:.0f}% of the loop")
+
     normal = Vector(ORBIT_NORMAL)
     if normal.length < 1e-9:
         raise ValueError("ORBIT_NORMAL must be a non-zero vector")
@@ -1529,11 +1878,18 @@ def main():
             build_field_line_objects(col, lines)
 
     if SHOW_TRAIL:
-        build_motion_trail(col, centre, normal)
-        print(f"[exciton] orbit radius {ORBIT_RADIUS:.2f}, electron at "
-              f"{ORBIT_PHASE:.0f} deg; tail of {TRAIL_STRANDS} strands over "
-              f"{TRAIL_WIDTH:.2f} units, trailing "
-              f"{TRAIL_LENGTH * 100:.0f}% of the loop")
+        dashes = build_motion_trail(col, centre, normal)
+        print(f"[exciton] electron at {ORBIT_PHASE:.0f} deg; tail of "
+              f"{TRAIL_STRANDS} strands over {TRAIL_WIDTH:.2f} units, "
+              f"{dashes} dashes, solid for the first "
+              f"{TRAIL_SOLID * 100:.0f}% of it")
+
+    if SHOW_FUNNEL:
+        build_light_funnel(col, centre)
+        print(f"[exciton] light funnel dropping {FUNNEL_DROP:.1f} units, "
+              f"flaring to {FUNNEL_BOTTOM_RADIUS:.1f}"
+              + (f", pool of {FUNNEL_POOL_RADIUS:.1f}" if SHOW_FUNNEL_POOL
+                 else ""))
 
     build_particles(col, r_electron, r_hole)
 
