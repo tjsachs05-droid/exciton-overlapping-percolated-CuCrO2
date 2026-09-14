@@ -177,12 +177,24 @@ TRAIL_SEGMENTS       = 6      # cross-section resolution of a strand
 SHOW_FUNNEL          = True
 FUNNEL_DIRECTION     = (0.0, 0.0, -1.0)  # which way the funnel drops
 FUNNEL_DROP          = 7.5    # how far down it reaches
-FUNNEL_TOP_RADIUS    = 0.55   # radius where it leaves the exciton
+# The funnel is an hourglass: it flares out of the exciton, pinches to a
+# waist, then opens again where it lands. Each end is set on its own, so the
+# mouth at the exciton and the spread on the sheet are independent.
+FUNNEL_TOP_RADIUS    = 2.4    # radius where it leaves the exciton
+FUNNEL_WAIST_RADIUS  = 0.50   # radius at the pinch
 FUNNEL_BOTTOM_RADIUS = 4.2    # radius where it lands
-FUNNEL_FLARE         = 2.2    # >1 keeps it narrow then flares near the
-                              # bottom, which is the trumpet shape rather
-                              # than a plain cone
-FUNNEL_TOP_LEVEL     = 1.6    # brightness at the exciton end
+FUNNEL_WAIST         = 0.42   # where the pinch sits along the drop: 0 at the
+                              # exciton, 1 at the sheet. Below 0.5 the lower
+                              # half is the longer one, which gives the wide
+                              # slow flare down onto the layer.
+FUNNEL_TOP_FLARE     = 1.8    # >1 holds each half near the waist radius and
+FUNNEL_BOTTOM_FLARE  = 2.4    # then opens it near its end, which is what
+                              # makes the curve an hourglass rather than two
+                              # straight cones. 1 gives straight cones, below
+                              # 1 flares immediately into a bell.
+FUNNEL_TOP_LEVEL     = 1.5    # brightness at the exciton end
+FUNNEL_WAIST_LEVEL   = 1.8    # brightness at the pinch, where the light is
+                              # at its most concentrated
 FUNNEL_BOTTOM_LEVEL  = 0.5    # brightness where it lands
 FUNNEL_LEVEL         = 1.0    # overall multiplier, driven by the binding
                               # strength
@@ -1366,13 +1378,35 @@ def build_motion_trail(col, centre, normal):
     return dashes
 
 
+def funnel_profile(t, top, waist, bottom):
+    """
+    The hourglass, as a function of how far down the funnel you are: `top` at
+    the exciton, pinching to `waist`, opening out to `bottom` at the sheet.
+
+    Each half is shaped on its own so the two ends are independent -- the
+    mouth at the exciton and the spread where it lands rarely want the same
+    curve. The exponents act away from the waist, so above 1 each half hugs
+    the pinch and then opens near its own end; that is what makes the
+    silhouette an hourglass rather than two straight cones.
+
+    Used for the radius and, with the three brightness levels, for the colour
+    down the funnel as well.
+    """
+    w = min(max(FUNNEL_WAIST, 0.0), 1.0)
+    if t <= w:
+        u = (w - t) / w if w > 1e-6 else 0.0        # 1 at the top, 0 at the waist
+        return waist + (top - waist) * u ** max(FUNNEL_TOP_FLARE, 0.01)
+    u = (t - w) / (1.0 - w) if w < 1.0 - 1e-6 else 0.0   # 0 at the waist, 1 at the end
+    return waist + (bottom - waist) * u ** max(FUNNEL_BOTTOM_FLARE, 0.01)
+
+
 def build_light_funnel(col, centre):
     """
     A cone of light dropping from the exciton to the layer below it, as in
     Reference 1.
 
-    FUNNEL_FLARE above 1 holds it narrow out of the exciton and opens it near
-    the bottom, which is the trumpet shape rather than a plain cone. Its alpha
+    It is an hourglass: a mouth at the exciton, a pinch at FUNNEL_WAIST, and a
+    wide landing on the sheet, with each end shaped independently. Its alpha
     is written per vertex so it fades along its length, and the material fades
     it again at its own silhouette -- without that second term the cone has a
     visible outline and reads as a solid shell instead of a shaft of light.
@@ -1390,14 +1424,14 @@ def build_light_funnel(col, centre):
     colour = pair_color(FUNNEL_COLOR or HOLE_RIM)
     rings = max(int(FUNNEL_RINGS), 2)
     segs = max(int(FUNNEL_SEGMENTS), 6)
-    flare = max(FUNNEL_FLARE, 0.01)
 
     verts, faces, colors = [], [], []
     for i in range(rings + 1):
         t = i / rings                          # 0 at the exciton, 1 at the sheet
-        r = FUNNEL_TOP_RADIUS + (FUNNEL_BOTTOM_RADIUS - FUNNEL_TOP_RADIUS) * t ** flare
-        level = (FUNNEL_TOP_LEVEL +
-                 (FUNNEL_BOTTOM_LEVEL - FUNNEL_TOP_LEVEL) * t) * FUNNEL_LEVEL
+        r = max(funnel_profile(t, FUNNEL_TOP_RADIUS, FUNNEL_WAIST_RADIUS,
+                               FUNNEL_BOTTOM_RADIUS), 0.0)
+        level = funnel_profile(t, FUNNEL_TOP_LEVEL, FUNNEL_WAIST_LEVEL,
+                               FUNNEL_BOTTOM_LEVEL) * FUNNEL_LEVEL
         ring_centre = centre + drop * (FUNNEL_DROP * t)
         # brightness may run past 1 for the glow; the alpha may not
         c = (tuple(v * max(level, 0.0) for v in colour)
@@ -1886,8 +1920,10 @@ def main():
 
     if SHOW_FUNNEL:
         build_light_funnel(col, centre)
-        print(f"[exciton] light funnel dropping {FUNNEL_DROP:.1f} units, "
-              f"flaring to {FUNNEL_BOTTOM_RADIUS:.1f}"
+        print(f"[exciton] light funnel dropping {FUNNEL_DROP:.1f} units: "
+              f"{FUNNEL_TOP_RADIUS:.1f} at the exciton, pinched to "
+              f"{FUNNEL_WAIST_RADIUS:.1f} at {FUNNEL_WAIST * 100:.0f}% down, "
+              f"{FUNNEL_BOTTOM_RADIUS:.1f} where it lands"
               + (f", pool of {FUNNEL_POOL_RADIUS:.1f}" if SHOW_FUNNEL_POOL
                  else ""))
 
