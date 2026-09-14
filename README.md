@@ -109,12 +109,20 @@ widen `RESOLUTION` if that bothers you.
 * `TRAIL_SHEAR` makes the outer strands trail longer so the tail feathers out
   instead of ending on a straight edge; `TRAIL_EDGE_FADE` dims the outer
   strands so the band has a bright spine.
-* `SHOW_FUNNEL` drops a cone of light from the exciton to the layer below it,
-  as in `Reference 1`, with `SHOW_FUNNEL_POOL` lighting the spot where it
-  lands. `FUNNEL_FLARE` above 1 holds it narrow out of the exciton and opens
-  it near the bottom — the trumpet shape rather than a plain cone. This is
-  what ties the exciton to the lattice instead of leaving it floating over
-  the top, so it is worth keeping once the two renders are combined.
+* `SHOW_FUNNEL` drops a funnel of light from the exciton to the layer below
+  it, as in `Reference 1`, with `SHOW_FUNNEL_POOL` lighting the spot where it
+  lands. This is what ties the exciton to the lattice instead of leaving it
+  floating over the top, so it is worth keeping once the two renders are
+  combined.
+* The funnel is an **hourglass**, and each end is set on its own:
+  `FUNNEL_TOP_RADIUS` is the mouth at the exciton, `FUNNEL_BOTTOM_RADIUS` the
+  spread where it lands, and `FUNNEL_WAIST_RADIUS` the pinch between them at
+  `FUNNEL_WAIST` of the way down. `FUNNEL_TOP_FLARE` and
+  `FUNNEL_BOTTOM_FLARE` shape the two halves independently: above 1 each half
+  hugs the pinch and opens near its own end, 1 gives straight cones, below 1
+  flares straight out of the waist into a bell. `FUNNEL_WAIST_LEVEL` sits
+  between the two end brightnesses, so the light can be at its most
+  concentrated where the funnel is narrowest.
 * `SHOW_FIELD_LINES` — the full dipole streamline bundle, off by default.
   The physics is unchanged; it is just no longer what carries the picture.
 * `AURA_MARGIN` — the aura is a spindle sitting directly between the two
